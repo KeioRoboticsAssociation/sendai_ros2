@@ -17,7 +17,15 @@ class RobotControlNode(Node):
         self.STATE_COLLECTING_BALL = "COLLECTING_BALL"
         self.STATE_REALIGNING_TO_LINE = "REALIGNING_TO_LINE"
         self.STATE_STOPPED = "STOPPED"
-        self.current_state = self.STATE_SEARCHING_LINE
+
+        # New Mission States
+        self.STATE_INITIAL_COLLECTION_PHASE = "INITIAL_COLLECTION_PHASE"
+        self.STATE_NAVIGATING_TO_DISCHARGE = "NAVIGATING_TO_DISCHARGE"
+        self.STATE_DISCHARGING_BALLS = "DISCHARGING_BALLS"
+        self.STATE_SECOND_COLLECTION_PHASE = "SECOND_COLLECTION_PHASE"
+        self.STATE_MISSION_COMPLETE = "MISSION_COMPLETE"
+
+        self.current_state = self.STATE_INITIAL_COLLECTION_PHASE # Initial state for the mission
         # self.get_logger().info(f"Initial state: {self.current_state}")
 
         # Parameters for line following
@@ -89,6 +97,21 @@ class RobotControlNode(Node):
             self.get_logger().error(f"kinematics.max_wheel_speed_mps must be positive. Value: {self.max_wheel_speed}. Defaulting to 0.5 m/s.")
             self.max_wheel_speed = 0.5
 
+        # Mission Parameters
+        self.declare_parameter('mission.balls_for_first_phase', 2) # Default: 2 for testing
+        self.declare_parameter('mission.total_balls_to_collect', 4) # Default: 4 for testing
+        self.declare_parameter('mission.discharge_wait_duration_s', 5.0)
+
+        # Initialize Mission Variables
+        self.balls_for_first_phase = self.get_parameter('mission.balls_for_first_phase').get_parameter_value().integer_value
+        self.total_balls_to_collect = self.get_parameter('mission.total_balls_to_collect').get_parameter_value().integer_value
+        self.discharge_wait_duration = rclpy.duration.Duration(seconds=self.get_parameter('mission.discharge_wait_duration_s').get_parameter_value().double_value)
+        self.discharge_phase_start_time = None
+        self.first_discharge_complete = False
+        self.collected_balls_this_run = [] # Tracks balls collected in the current phase
+        # self.total_collected_ever = 0 # If needed for more complex logic, but current plan relies on collected_balls_this_run and first_discharge_complete
+        self.current_main_line_image_x = None # Added for side-specific ball collection
+
         # General state variables
         self.current_target_vx = 0.0
         self.current_target_vy = 0.0
@@ -97,7 +120,7 @@ class RobotControlNode(Node):
         self.latest_lines_msg = None
         self.latest_balls_msg = None
         self.target_ball_info = None # Stores info of the ball being approached { 'color': str, 'position': Point }
-        self.collected_balls = [] # Log of collected ball colors
+        # self.collected_balls = [] # Replaced by collected_balls_this_run for phase logic
 
         # Subscribers
         self.line_subscriber = self.create_subscription(
@@ -150,7 +173,21 @@ class RobotControlNode(Node):
             self.current_target_vx = 0.0
             self.current_target_vy = 0.0
             self.current_target_v_omega = 0.0
-        # (No more states to add for now)
+        # New mission state handlers
+        elif self.current_state == self.STATE_INITIAL_COLLECTION_PHASE:
+            self.handle_initial_collection_phase()
+        elif self.current_state == self.STATE_NAVIGATING_TO_DISCHARGE:
+            self.handle_navigating_to_discharge()
+        elif self.current_state == self.STATE_DISCHARGING_BALLS:
+            self.handle_discharging_balls()
+        elif self.current_state == self.STATE_SECOND_COLLECTION_PHASE:
+            self.handle_second_collection_phase()
+        elif self.current_state == self.STATE_MISSION_COMPLETE:
+            self.handle_mission_complete()
+        else:
+            self.get_logger().error(f"Unknown state: {self.current_state}. Stopping robot.")
+            self.current_state = self.STATE_STOPPED
+
 
         # self.get_logger().debug(f"Calculated Target Vels: Vx={self.current_target_vx:.2f}, Vy={self.current_target_vy:.2f}, Vomega={self.current_target_v_omega:.2f}")
 
@@ -181,6 +218,7 @@ class RobotControlNode(Node):
             self.get_logger().info("Line found. Transitioning to FOLLOWING_LINE.")
             self.current_target_v_omega = 0.0 # Stop search rotation
         else:
+            self.current_main_line_image_x = None # Line not found
             self.current_target_vx = 0.0
             self.current_target_vy = 0.0
             self.current_target_v_omega = self.search_rotation_speed
@@ -205,12 +243,15 @@ class RobotControlNode(Node):
                 self.current_target_vy = 0.0
                 self.current_target_v_omega = 0.0
                 self.latest_lines_msg = None # Clear old message
+                self.current_main_line_image_x = None # Line lost
                 return
 
         vertical_line, has_only_horizontal = self.find_target_line(self.latest_lines_msg)
 
         if vertical_line:
             self.last_line_seen_time = current_time
+            # Update current_main_line_image_x
+            self.current_main_line_image_x = (vertical_line.start.x + vertical_line.end.x) / 2.0
 
             p1 = vertical_line.start
             p2 = vertical_line.end
@@ -252,9 +293,11 @@ class RobotControlNode(Node):
             self.current_target_vy = 0.0
             self.current_target_v_omega = 0.0
             self.latest_lines_msg = None # Clear message
+            self.current_main_line_image_x = None # Line lost/irrelevant
         else:
             # No vertical line found, but not "only_horizontal". This could be no lines at all.
             # The timeout check at the beginning of the function should handle persistent lack of usable lines.
+            self.current_main_line_image_x = None # Line not reliably found
             # If we are here, it means we are within the timeout.
             # self.get_logger().warn("Following_line: No usable vertical line in current frame. Holding previous commands or slowing down. Timeout will eventually trigger search.")
             # Let's slow down if no vertical line is seen, but we are not yet in timeout.
@@ -265,8 +308,15 @@ class RobotControlNode(Node):
             # The last_line_seen_time is NOT updated here. If this persists, timeout will occur.
 
         # Check for balls if following line
+        # Only look for balls if we haven't met the collection target for the current phase
+        # This check is implicitly handled by the fact that handle_collecting_ball will transition
+        # to NAVIGATING_TO_DISCHARGE, so we won't be in FOLLOWING_LINE if the target was met.
         if self.latest_balls_msg and self.latest_balls_msg.positions:
-            selected_ball = self.select_target_ball(self.latest_balls_msg)
+            # Check if we should even be looking for balls based on mission phase
+            # This logic is a bit tricky here, as handle_collecting_ball is the primary decider.
+            # For now, we allow selecting a ball, and handle_collecting_ball will sort it out.
+            # Pass current_main_line_image_x for side-specific selection
+            selected_ball = self.select_target_ball(self.latest_balls_msg, self.current_main_line_image_x)
             if selected_ball:
                 self.target_ball_info = {'color': selected_ball.color, 'position': selected_ball.position}
                 self.current_state = self.STATE_APPROACHING_BALL
@@ -278,24 +328,64 @@ class RobotControlNode(Node):
                 self.current_target_v_omega = 0.0
                 return # Exit to allow handle_approaching_ball to take over in next loop iteration
 
-    def select_target_ball(self, balls_msg):
+    def select_target_ball(self, balls_msg, main_line_center_x):
         if not balls_msg or not balls_msg.positions:
             return None
 
-        # Select ball with largest y (closest to bottom of image), then smallest x distance from center
+        candidate_balls = []
+
+        if self.current_state == self.STATE_INITIAL_COLLECTION_PHASE:
+            if main_line_center_x is None:
+                self.get_logger().warn("INITIAL_COLLECTION_PHASE: Trying to select LEFT ball, but line position is unknown.")
+                return None
+            for ball in balls_msg.positions:
+                if ball.position.x < main_line_center_x:
+                    candidate_balls.append(ball)
+            if not candidate_balls:
+                self.get_logger().info("INITIAL_COLLECTION_PHASE: No balls found on the LEFT side of the line.")
+                return None
+        elif self.current_state == self.STATE_SECOND_COLLECTION_PHASE:
+            if main_line_center_x is None:
+                self.get_logger().warn("SECOND_COLLECTION_PHASE: Trying to select RIGHT ball, but line position is unknown.")
+                return None
+            for ball in balls_msg.positions:
+                if ball.position.x >= main_line_center_x: # Greater than or equal to for the right side
+                    candidate_balls.append(ball)
+            if not candidate_balls:
+                self.get_logger().info("SECOND_COLLECTION_PHASE: No balls found on the RIGHT side of the line.")
+                return None
+        else:
+            # Fallback or other states not requiring side-specific collection
+            # For current mission logic, ball selection should primarily happen in collection phases.
+            # If called from another state, it might just use all balls.
+            self.get_logger().debug(f"select_target_ball called from state {self.current_state}, not a primary collection phase. Considering all balls.")
+            candidate_balls = list(balls_msg.positions)
+
+
+        if not candidate_balls:
+            # This case should ideally be caught by the phase-specific empty checks above.
+            # self.get_logger().debug("No candidate balls after filtering.")
+            return None
+
+        # Select ball with largest y (closest to bottom of image), then smallest x distance from target_ball_x (center of image)
         best_ball = None
         max_y = -1.0
 
-        for ball in balls_msg.positions:
+        for ball in candidate_balls:
             if ball.position.y > max_y:
                 max_y = ball.position.y
                 best_ball = ball
-            elif ball.position.y == max_y: # Tie-break with x distance to target_ball_x
+            elif ball.position.y == max_y: # Tie-break with x distance to target_ball_x (image center for alignment)
                 if best_ball is None or \
                    abs(ball.position.x - self.target_ball_x) < abs(best_ball.position.x - self.target_ball_x):
                     best_ball = ball
+        
+        if best_ball:
+            side = "LEFT" if self.current_state == self.STATE_INITIAL_COLLECTION_PHASE else ("RIGHT" if self.current_state == self.STATE_SECOND_COLLECTION_PHASE else "ANY")
+            self.get_logger().info(f"Selected target ball on {side} side: {best_ball.color} at ({best_ball.position.x:.1f}, {best_ball.position.y:.1f}) from {len(candidate_balls)} candidates.")
+        # else:
+            # self.get_logger().debug(f"No best ball selected from {len(candidate_balls)} candidates on the target side.")
 
-        # self.get_logger().debug(f"Selected target ball: {best_ball.color if best_ball else 'None'} at Y={max_y:.1f}")
         return best_ball
 
     def handle_approaching_ball(self):
@@ -399,18 +489,41 @@ class RobotControlNode(Node):
 
         if not ball_is_still_visible:
             collected_color = self.target_ball_info['color']
-            self.collected_balls.append(collected_color) # Use self.collected_balls
-            self.get_logger().info(f"Successfully collected ball of color: {collected_color}. Collected count: {len(self.collected_balls)}, Order: {self.collected_balls}")
+            self.collected_balls_this_run.append(collected_color)
+            # self.total_collected_ever +=1 # If using this variable
 
-            self.target_ball_info = None # Clear the target
-            # Post-collection delay is declared but not actively used with a timer here for simplicity.
-            # Transition directly. If a pause is needed, a temporary state or a short timer before transitioning can be added.
-            self.current_state = self.STATE_REALIGNING_TO_LINE
-            self.realign_state_start_time = self.get_clock().now() # Mark start of realignment attempt
-            self.get_logger().info("Transitioning to REALIGNING_TO_LINE.")
-            # Reset line tracking variables to force re-evaluation in REALIGNING state
+            self.get_logger().info(f"Successfully collected ball of color: {collected_color}. Balls in this run: {len(self.collected_balls_this_run)} ({self.collected_balls_this_run}).")
+
+            self.target_ball_info = None # Clear the target ball info
+
+            # Mission logic for transitioning after collection
+            if not self.first_discharge_complete and \
+               len(self.collected_balls_this_run) >= self.balls_for_first_phase:
+                self.get_logger().info(f"First phase collection target ({self.balls_for_first_phase} balls) reached.")
+                self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
+            elif self.first_discharge_complete and \
+                 len(self.collected_balls_this_run) >= (self.total_balls_to_collect - self.balls_for_first_phase):
+                # This assumes total_balls_to_collect is the grand total, and balls_for_first_phase were already collected and "discharged"
+                # So, we are checking if we collected the remaining amount for the second phase.
+                self.get_logger().info(f"Second phase collection target reached (collected {len(self.collected_balls_this_run)} out of remaining {(self.total_balls_to_collect - self.balls_for_first_phase)}).")
+                self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
+            # Safety check: if total_balls_to_collect is met by collected_balls_this_run, even if phase logic didn't catch it.
+            # This can happen if total_balls_to_collect < balls_for_first_phase or similar configurations.
+            elif len(self.collected_balls_this_run) >= self.total_balls_to_collect and not self.first_discharge_complete:
+                 self.get_logger().info(f"Total collection target ({self.total_balls_to_collect} balls) met within the first phase.")
+                 self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
+            elif self.first_discharge_complete and sum([self.balls_for_first_phase, len(self.collected_balls_this_run)]) >= self.total_balls_to_collect :
+                 self.get_logger().info(f"Total collection target ({self.total_balls_to_collect} balls) met after starting second phase.")
+                 self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
+            else:
+                # Collection target for the current phase not yet reached, continue collecting.
+                self.current_state = self.STATE_REALIGNING_TO_LINE
+                self.realign_state_start_time = self.get_clock().now()
+                self.get_logger().info("Collection target not met for this phase. Transitioning to REALIGNING_TO_LINE.")
+
+            # Reset line tracking variables to force re-evaluation in REALIGNING or if returning to line following
             self.latest_lines_msg = None
-            self.last_line_seen_time = self.get_clock().now() # Reset to avoid immediate timeout in line following later
+            self.last_line_seen_time = self.get_clock().now()
             return
 
         # If ball is still visible, check for timeout
@@ -423,6 +536,72 @@ class RobotControlNode(Node):
             return
 
         # self.get_logger().debug(f"Waiting for ball ({self.target_ball_info['color']}) to disappear. Still visible.")
+
+    # New Mission State Handler Implementations
+    def handle_initial_collection_phase(self):
+        self.get_logger().info("Entering INITIAL_COLLECTION_PHASE.")
+        self.collected_balls_this_run.clear()
+        # self.collection_target_achieved_this_phase = False # Not using this flag based on current logic
+        self.current_state = self.STATE_SEARCHING_LINE
+        self.get_logger().info("Transitioning from INITIAL_COLLECTION_PHASE to SEARCHING_LINE.")
+
+    def handle_second_collection_phase(self):
+        self.get_logger().info("Entering SECOND_COLLECTION_PHASE.")
+        self.collected_balls_this_run.clear()
+        # self.collection_target_achieved_this_phase = False # Not using this flag
+        # Potentially turn around or a more specific realignment strategy here.
+        # For now, just search for the line again.
+        self.current_state = self.STATE_SEARCHING_LINE
+        self.get_logger().info("Transitioning from SECOND_COLLECTION_PHASE to SEARCHING_LINE.")
+
+    def handle_navigating_to_discharge(self):
+        self.get_logger().info("Entering NAVIGATING_TO_DISCHARGE.")
+        self.current_target_vx = 0.0
+        self.current_target_vy = 0.0
+        self.current_target_v_omega = 0.0
+        # In a real scenario, this state would involve navigation logic.
+        # For now, we simulate arrival.
+        self.get_logger().info("Simulating navigation to discharge area... Arrived.")
+        self.current_state = self.STATE_DISCHARGING_BALLS
+        self.discharge_phase_start_time = self.get_clock().now()
+        self.get_logger().info("Transitioning to DISCHARGING_BALLS.")
+
+    def handle_discharging_balls(self):
+        self.get_logger().debug(f"Handling DISCHARGING_BALLS state. Time started: {self.discharge_phase_start_time}")
+        self.current_target_vx = 0.0
+        self.current_target_vy = 0.0
+        self.current_target_v_omega = 0.0
+
+        if self.discharge_phase_start_time is None: # Should have been set in NAVIGATING_TO_DISCHARGE
+            self.get_logger().error("Discharge phase start time not set! Transitioning to STOPPED.")
+            self.current_state = self.STATE_STOPPED
+            return
+
+        if (self.get_clock().now() - self.discharge_phase_start_time) > self.discharge_wait_duration:
+            self.get_logger().info(f"Discharge complete. Balls cleared during this phase: {self.collected_balls_this_run}")
+            self.collected_balls_this_run.clear() # Clear balls from this specific run
+
+            if not self.first_discharge_complete:
+                self.first_discharge_complete = True
+                self.get_logger().info("First discharge complete. Transitioning to SECOND_COLLECTION_PHASE.")
+                self.current_state = self.STATE_SECOND_COLLECTION_PHASE
+            else:
+                # This was the second discharge (or a discharge after total balls collected)
+                self.get_logger().info("Final discharge complete. Transitioning to MISSION_COMPLETE.")
+                self.current_state = self.STATE_MISSION_COMPLETE
+            self.discharge_phase_start_time = None # Reset for next potential discharge
+        else:
+            self.get_logger().debug("Waiting for discharge timer...")
+
+
+    def handle_mission_complete(self):
+        self.get_logger().info("Entering MISSION_COMPLETE.")
+        self.current_target_vx = 0.0
+        self.current_target_vy = 0.0
+        self.current_target_v_omega = 0.0
+        self.get_logger().info("MISSION ACCOMPLISHED. Robot stopped.")
+        # Robot stays in this state. Further actions might require external reset or new commands.
+
 
     def handle_realigning_to_line(self):
         # self.get_logger().debug("Handling REALIGNING_TO_LINE state.")
@@ -464,21 +643,47 @@ class RobotControlNode(Node):
     def calculate_wheel_efforts(self, vx_mps, vy_mps, v_omega_radps):
         # self.get_logger().debug(f"Calculating wheel efforts for Vx={vx_mps:.2f}, Vy={vy_mps:.2f}, Vomega={v_omega_radps:.2f}")
 
+        # Robot coordinate system:
+        # vx_mps: Forward velocity
+        # vy_mps: Strafe left velocity
+        # v_omega_radps: Counter-clockwise rotational velocity
+
+        # Wheel angles (relative to robot's X-axis, positive CCW):
+        # Wheel 1 (front-right): 60 degrees (pi/3 rad)
+        # Wheel 2 (rear): 180 degrees (pi rad)
+        # Wheel 3 (front-left): 300 degrees (5pi/3 rad)
+
         L = self.robot_radius
 
-        # Inverse kinematics for 3 omni-wheels at 0, 120 (2*pi/3), 240 (4*pi/3) degrees
-        # Wheel 1 (front, at 0 deg):
-        # v_w1 = v_y + L * omega
-        # Wheel 2 (right-rear, at 120 deg or 2pi/3 rad):
-        # v_w2 = -sin(2pi/3)*v_x + cos(2pi/3)*v_y + L*omega
-        #      = -sqrt(3)/2 * v_x  - 1/2 * v_y      + L*omega
-        # Wheel 3 (left-rear, at 240 deg or 4pi/3 rad):
-        # v_w3 = -sin(4pi/3)*v_x + cos(4pi/3)*v_y + L*omega
-        #      = sqrt(3)/2 * v_x   - 1/2 * v_y      + L*omega
+        # Pre-calculate sin/cos for efficiency and clarity
+        sin_pi_3 = math.sin(math.pi / 3.0) # sqrt(3)/2
+        cos_pi_3 = math.cos(math.pi / 3.0) # 1/2
 
-        v_w1 = vy_mps + L * v_omega_radps
-        v_w2 = (-math.sqrt(3)/2.0 * vx_mps) - (0.5 * vy_mps) + (L * v_omega_radps)
-        v_w3 = (math.sqrt(3)/2.0 * vx_mps) - (0.5 * vy_mps) + (L * v_omega_radps)
+        # Inverse Kinematics Equations:
+        # v_wi = -vx * sin(theta_i) + vy * cos(theta_i) + L * omega
+        # Note: These equations assume the roller axles are perpendicular to the direction
+        # from the robot center to the wheel center.
+
+        # Wheel 1 (front-right, 60 deg or pi/3 rad)
+        # theta_1 = pi/3
+        # v_w1 = -vx_mps * sin(pi/3) + vy_mps * cos(pi/3) + L * v_omega_radps
+        v_w1 = -vx_mps * sin_pi_3 + vy_mps * cos_pi_3 + L * v_omega_radps
+
+        # Wheel 2 (rear, 180 deg or pi rad)
+        # theta_2 = pi
+        # v_w2 = -vx_mps * sin(pi) + vy_mps * cos(pi) + L * v_omega_radps
+        #      = -vx_mps * 0     + vy_mps * (-1)    + L * v_omega_radps
+        #      = -vy_mps + L * v_omega_radps
+        v_w2 = -vy_mps + L * v_omega_radps
+
+        # Wheel 3 (front-left, 300 deg or 5pi/3 rad)
+        # theta_3 = 5pi/3
+        # sin(5pi/3) = -sqrt(3)/2
+        # cos(5pi/3) = 1/2
+        # v_w3 = -vx_mps * sin(5pi/3) + vy_mps * cos(5pi/3) + L * v_omega_radps
+        #      = -vx_mps * (-sqrt(3)/2) + vy_mps * (1/2) + L * v_omega_radps
+        #      =  vx_mps * sqrt(3)/2   + vy_mps * 1/2   + L * v_omega_radps
+        v_w3 = vx_mps * sin_pi_3 + vy_mps * cos_pi_3 + L * v_omega_radps # sin_pi_3 is sqrt(3)/2, cos_pi_3 is 1/2
 
         # self.get_logger().debug(f"Calculated wheel speeds (m/s): w1={v_w1:.2f}, w2={v_w2:.2f}, w3={v_w3:.2f}")
 
