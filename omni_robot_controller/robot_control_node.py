@@ -641,65 +641,31 @@ class RobotControlNode(Node):
         # self.get_logger().debug(f"Realigning: Target Vels: Vx={self.current_target_vx:.2f}, Vy={self.current_target_vy:.2f}, Vomega={self.current_target_v_omega:.2f}")
 
     def calculate_wheel_efforts(self, vx_mps, vy_mps, v_omega_radps):
-        # self.get_logger().debug(f"Calculating wheel efforts for Vx={vx_mps:.2f}, Vy={vy_mps:.2f}, Vomega={v_omega_radps:.2f}")
+        # ホイールの配置角度（ラジアン）
+        angle_w1 = 0           # ホイール1: 前方
+        angle_w2 = 2 * math.pi / 3  # ホイール2: 左後方 120°
+        angle_w3 = 4 * math.pi / 3  # ホイール3: 右後方 240°
 
-        # Robot coordinate system:
-        # vx_mps: Forward velocity
-        # vy_mps: Strafe left velocity
-        # v_omega_radps: Counter-clockwise rotational velocity
+        # 個々のホイール速度[m/s]を逆運動学で算出
+        v_w1 = vx_mps * math.cos(angle_w1) + vy_mps * math.sin(angle_w1) + v_omega_radps * self.wheel_base_radius
+        v_w2 = vx_mps * math.cos(angle_w2) + vy_mps * math.sin(angle_w2) + v_omega_radps * self.wheel_base_radius
+        v_w3 = vx_mps * math.cos(angle_w3) + vy_mps * math.sin(angle_w3) + v_omega_radps * self.wheel_base_radius
 
-        # Wheel angles (relative to robot's X-axis, positive CCW):
-        # Wheel 1 (front-right): 60 degrees (pi/3 rad)
-        # Wheel 2 (rear): 180 degrees (pi rad)
-        # Wheel 3 (front-left): 300 degrees (5pi/3 rad)
+        # 各ホイールの最大回転速度[rad/s]
+        max_wheel_speed = self.max_wheel_speed  # パラメータで設定済み
+        if max_wheel_speed <= 0:
+            raise ValueError("max_wheel_speed must be positive")
 
-        L = self.robot_radius
+        # 正規化: effort = wheel_speed / max_wheel_speed を [-1, 1] にクランプ
+        def clamp(val, min_val=-1.0, max_val=1.0):
+            return max(min(val, max_val), min_val)
 
-        # Pre-calculate sin/cos for efficiency and clarity
-        sin_pi_3 = math.sin(math.pi / 3.0) # sqrt(3)/2
-        cos_pi_3 = math.cos(math.pi / 3.0) # 1/2
+        effort_w1 = clamp(v_w1 / max_wheel_speed)
+        effort_w2 = clamp(v_w2 / max_wheel_speed)
+        effort_w3 = clamp(v_w3 / max_wheel_speed)
 
-        # Inverse Kinematics Equations:
-        # v_wi = -vx * sin(theta_i) + vy * cos(theta_i) + L * omega
-        # Note: These equations assume the roller axles are perpendicular to the direction
-        # from the robot center to the wheel center.
+        return [effort_w1, effort_w2, effort_w3]
 
-        # Wheel 1 (front-right, 60 deg or pi/3 rad)
-        # theta_1 = pi/3
-        # v_w1 = -vx_mps * sin(pi/3) + vy_mps * cos(pi/3) + L * v_omega_radps
-        v_w1 = -vx_mps * sin_pi_3 + vy_mps * cos_pi_3 + L * v_omega_radps
-
-        # Wheel 2 (rear, 180 deg or pi rad)
-        # theta_2 = pi
-        # v_w2 = -vx_mps * sin(pi) + vy_mps * cos(pi) + L * v_omega_radps
-        #      = -vx_mps * 0     + vy_mps * (-1)    + L * v_omega_radps
-        #      = -vy_mps + L * v_omega_radps
-        v_w2 = -vy_mps + L * v_omega_radps
-
-        # Wheel 3 (front-left, 300 deg or 5pi/3 rad)
-        # theta_3 = 5pi/3
-        # sin(5pi/3) = -sqrt(3)/2
-        # cos(5pi/3) = 1/2
-        # v_w3 = -vx_mps * sin(5pi/3) + vy_mps * cos(5pi/3) + L * v_omega_radps
-        #      = -vx_mps * (-sqrt(3)/2) + vy_mps * (1/2) + L * v_omega_radps
-        #      =  vx_mps * sqrt(3)/2   + vy_mps * 1/2   + L * v_omega_radps
-        v_w3 = vx_mps * sin_pi_3 + vy_mps * cos_pi_3 + L * v_omega_radps # sin_pi_3 is sqrt(3)/2, cos_pi_3 is 1/2
-
-        # self.get_logger().debug(f"Calculated wheel speeds (m/s): w1={v_w1:.2f}, w2={v_w2:.2f}, w3={v_w3:.2f}")
-
-        # Convert wheel speeds (m/s) to efforts [-1, 1]
-        # Avoid division by zero if max_wheel_speed is not correctly set (handled in __init__)
-        effort1 = v_w1 / self.max_wheel_speed
-        effort2 = v_w2 / self.max_wheel_speed
-        effort3 = v_w3 / self.max_wheel_speed
-
-        # Clip efforts to [-1.0, 1.0]
-        effort1 = max(min(effort1, 1.0), -1.0)
-        effort2 = max(min(effort2, 1.0), -1.0)
-        effort3 = max(min(effort3, 1.0), -1.0)
-
-        # self.get_logger().debug(f"Calculated efforts: e1={effort1:.2f}, e2={effort2:.2f}, e3={effort3:.2f}")
-        return [effort1, effort2, effort3]
 
     def find_target_line(self, lines_msg):
         # self.get_logger().debug(f"find_target_line called with {len(lines_msg.lines) if lines_msg and lines_msg.lines else 'None or empty'} lines.")
