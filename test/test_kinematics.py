@@ -49,12 +49,10 @@ def test_forward_motion(kinematics_params):
 def test_strafe_left_motion(kinematics_params):
     vx, vy, v_omega = 0.0, 0.1, 0.0
     efforts = calculate_expected_wheel_efforts(vx, vy, v_omega, **kinematics_params)
-    # v_w1 = 0.05
-    # v_w2 = -0.1
-    # v_w3 = 0.05
-    # e1 = 0.05/0.5 = 0.1
-    # e2 = -0.1/0.5 = -0.2
-    # e3 = 0.05/0.5 = 0.1
+    
+    # v_w1 = 0.5*0.1 = 0.05 => e1 = 0.1
+    # v_w2 = -0.1 => e2 = -0.2
+    # v_w3 = 0.05 => e3 = 0.1
     assert efforts[0] == pytest.approx(0.1)
     assert efforts[1] == pytest.approx(-0.2)
     assert efforts[2] == pytest.approx(0.1)
@@ -82,6 +80,7 @@ def test_clipping_motion(kinematics_params):
     # If vx = 0.7, then sqrt(3)/2 * 0.7 = 0.866 * 0.7 = 0.6062, which is > 0.5
     vx, vy, v_omega = 0.7, 0.0, 0.0
     efforts = calculate_expected_wheel_efforts(vx, vy, v_omega, **kinematics_params)
+
     # v_w1 = -(sqrt(3)/2)*0.7 = -0.6062 => e1 = -1.2124 => clipped to -1
     # v_w2 ≈ 0       => e2 = 0
     # v_w3 = (sqrt(3)/2)*0.7 = 0.6062 => e3 = 1.2124 => clipped to 1
