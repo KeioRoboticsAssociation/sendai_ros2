@@ -132,6 +132,7 @@ ros2 param set /robot_control_node mission.total_balls_to_collect 4
 
 ### Publish
 - `/motor_control_efforts` (Float32MultiArray): モータ制御指令 [effort1, effort2, effort3]
+- `/steer_command` (Float32MultiArray): rogilingflex.json ID9 "STEER" 送信用指令値
 
 ## テスト
 
