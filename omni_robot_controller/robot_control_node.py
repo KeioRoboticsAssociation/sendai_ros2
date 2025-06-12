@@ -93,7 +93,8 @@ class RobotControlNode(Node):
 
         # Initialize variables from kinematics parameters
         self.robot_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
-        self.wheel_base_radius = self.robot_radius
+        # Radius from robot center to each wheel for kinematics calculations
+        self.wheel_base_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
         self.max_wheel_speed = self.get_parameter('kinematics.max_wheel_speed_mps').get_parameter_value().double_value
         if self.max_wheel_speed <= 0:
             self.get_logger().error(f"kinematics.max_wheel_speed_mps must be positive. Value: {self.max_wheel_speed}. Defaulting to 0.5 m/s.")
@@ -653,17 +654,26 @@ class RobotControlNode(Node):
 
     def calculate_wheel_efforts(self, vx_mps, vy_mps, v_omega_radps):
         # ホイールの配置角度（ラジアン）
-        angle_w1 = math.radians(60)
-        angle_w2 = math.radians(180)
-        angle_w3 = math.radians(300)
+        angle_w1 = math.pi / 3      # ホイール1: 60°
+        angle_w2 = math.pi          # ホイール2: 180°
+        angle_w3 = 5 * math.pi / 3  # ホイール3: 300°
 
         # 個々のホイール速度[m/s]を逆運動学で算出
-        v_w1 = (-math.sin(angle_w1) * vx_mps + math.cos(angle_w1) * vy_mps +
-                v_omega_radps * self.wheel_base_radius)
-        v_w2 = (-math.sin(angle_w2) * vx_mps + math.cos(angle_w2) * vy_mps +
-                v_omega_radps * self.wheel_base_radius)
-        v_w3 = (-math.sin(angle_w3) * vx_mps + math.cos(angle_w3) * vy_mps +
-                v_omega_radps * self.wheel_base_radius)
+        v_w1 = (
+            -math.sin(angle_w1) * vx_mps
+            + math.cos(angle_w1) * vy_mps
+            + v_omega_radps * self.wheel_base_radius
+        )
+        v_w2 = (
+            -math.sin(angle_w2) * vx_mps
+            + math.cos(angle_w2) * vy_mps
+            + v_omega_radps * self.wheel_base_radius
+        )
+        v_w3 = (
+            -math.sin(angle_w3) * vx_mps
+            + math.cos(angle_w3) * vy_mps
+            + v_omega_radps * self.wheel_base_radius
+        )
 
         # 各ホイールの最大回転速度[rad/s]
         max_wheel_speed = self.max_wheel_speed  # パラメータで設定済み
