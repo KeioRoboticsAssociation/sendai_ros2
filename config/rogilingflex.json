@@ -48,63 +48,15 @@
     "transmission_messages" : [
         {
             "id": 1,
-            "name": "SETUP_ARMS",
-            "type": "uint8",
-            "args": "none"
-        },
-        {
-            "id": 2,
-            "name": "SETUP_ARMS",
-            "type": "uint8",
-            "args": "none"
-        },
-        {
-            "id": 3,
-            "name": "SET_MOTOR_VELOCITY",
-            "type": "uint8, float32",
-            "args": "motor_id, velocity"
-        },
-        {
-            "id": 4,
-            "name": "SET_MOTOR_ACCELERATION",
-            "type": "uint8, float32",
-            "args": "motor_id, acceleration"
-        },
-        {
-            "id": 5,
-            "name": "SET_PID_GAIN",
-            "type": "uint8, float32, float32, float32",
-            "args": "motor_id, kp, ki, kd"
-        },
-        {
-            "id": 6,
-            "name": "SET_MAX_SPEED",
-            "type": "uint8, float32",
-            "args": "motor_id, max_velocity"
-        },
-        {
-            "id": 7,
-            "name": "SET_MAX_ACCEL",
-            "type": "uint8, float32",
-            "args": "motor_id, max_acceleration"
-        },
-        {
-            "id": 8,
-            "name": "GET_CONFIG",
-            "type": "uint8",
-            "args": "motor_id"
-        },
-        {
-            "id": 9,
             "name": "STEER",
             "type": "float32, float32, float32",
             "args": "steer_theta1, steer_theta2, steer_theta3"
         },
         {
-            "id": 10,
-            "name": "YAWPITCH",
+            "id": 2,
+            "name": "SERVO",
             "type": "float32, float32",
-            "args": "shoot_yaw, shoot_pitch"
+            "args": "arm_pwm, shoot_pwm"
         }
     ]
 }
