@@ -57,6 +57,12 @@
             "name": "SERVO",
             "type": "float32, float32",
             "args": "arm_pwm, shoot_pwm"
+        },
+        {
+            "id": 3,
+            "name": "VACUUM",
+            "type": "float32",
+            "args": "vacuum_pwm"
         }
     ]
 }

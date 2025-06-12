@@ -6,6 +6,8 @@ import math
 import json
 import os
 import rclpy.duration
+from ctypes import c_float
+from rogilink_flex_lib import Publisher, Subscriber
 
 class RobotControlNode(Node):
     def __init__(self):
@@ -139,24 +141,9 @@ class RobotControlNode(Node):
             10)
 
         # Publishers
-        self.motor_efforts_publisher_ = self.create_publisher(
-            Float32MultiArray,
-            '/motor_control_efforts',
-            10)
-
-        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'rogilingflex.json')
-        try:
-            with open(config_path, 'r') as f:
-                cfg = json.load(f)
-            self.steer_msg_id = next((m['id'] for m in cfg.get('transmission_messages', []) if m.get('name') == 'STEER'), 9)
-        except Exception as e:
-            self.get_logger().warn(f'Failed to load STEER config: {e}')
-            self.steer_msg_id = 9
-
-        self.steer_publisher = self.create_publisher(
-            Float32MultiArray,
-            '/steer_command',
-            10)
+        self.motor_efforts_publisher_ = Publisher(self, 'STEER', (c_float, c_float, c_float))
+        self.servo_pub = Publisher(self, 'SERVO', (c_float, c_float))
+        self.vacuum_pub = Publisher(self, 'VACUUM', (c_float))
 
         # Timer for the main control loop
         self.control_loop_timer = self.create_timer(0.1, self.control_loop)
