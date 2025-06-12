@@ -16,9 +16,9 @@ def calculate_expected_wheel_efforts(vx_mps, vy_mps, v_omega_radps, robot_radius
 
     L = robot_radius
 
-    v_w1 = vy_mps + L * v_omega_radps
-    v_w2 = (-math.sqrt(3)/2.0 * vx_mps) - (0.5 * vy_mps) + (L * v_omega_radps)
-    v_w3 = (math.sqrt(3)/2.0 * vx_mps) - (0.5 * vy_mps) + (L * v_omega_radps)
+    v_w1 = (-math.sqrt(3)/2.0 * vx_mps) + (0.5 * vy_mps) + (L * v_omega_radps)
+    v_w2 = (-vy_mps) + (L * v_omega_radps)
+    v_w3 = (math.sqrt(3)/2.0 * vx_mps) + (0.5 * vy_mps) + (L * v_omega_radps)
 
     effort1 = v_w1 / max_wheel_speed
     effort2 = v_w2 / max_wheel_speed
@@ -40,20 +40,22 @@ def kinematics_params():
 def test_forward_motion(kinematics_params):
     vx, vy, v_omega = 0.1, 0.0, 0.0
     efforts = calculate_expected_wheel_efforts(vx, vy, v_omega, **kinematics_params)
-    # v_w1 = 0, v_w2 = -sqrt(3)/2*0.1 = -0.0866, v_w3 = sqrt(3)/2*0.1 = 0.0866
-    # e1 = 0, e2 = -0.0866/0.5 = -0.1732, e3 = 0.0866/0.5 = 0.1732
-    assert efforts[0] == pytest.approx(0.0)
-    assert efforts[1] == pytest.approx(-0.1732, abs=1e-4)
+    # v_w1 = -0.866*0.1 = -0.0866 => e1 = -0.1732
+    # v_w2 = 0 => e2 = 0
+    # v_w3 = 0.0866 => e3 = 0.1732
+    assert efforts[0] == pytest.approx(-0.1732, abs=1e-4)
+    assert efforts[1] == pytest.approx(0.0)
     assert efforts[2] == pytest.approx(0.1732, abs=1e-4)
 
 def test_strafe_left_motion(kinematics_params):
     vx, vy, v_omega = 0.0, 0.1, 0.0
     efforts = calculate_expected_wheel_efforts(vx, vy, v_omega, **kinematics_params)
-    # v_w1 = 0.1, v_w2 = -0.5*0.1 = -0.05, v_w3 = -0.5*0.1 = -0.05
-    # e1 = 0.1/0.5 = 0.2, e2 = -0.05/0.5 = -0.1, e3 = -0.05/0.5 = -0.1
-    assert efforts[0] == pytest.approx(0.2)
-    assert efforts[1] == pytest.approx(-0.1)
-    assert efforts[2] == pytest.approx(-0.1)
+    # v_w1 = 0.5*0.1 = 0.05 => e1 = 0.1
+    # v_w2 = -0.1 => e2 = -0.2
+    # v_w3 = 0.05 => e3 = 0.1
+    assert efforts[0] == pytest.approx(0.1)
+    assert efforts[1] == pytest.approx(-0.2)
+    assert efforts[2] == pytest.approx(0.1)
 
 def test_rotate_ccw_motion(kinematics_params):
     vx, vy, v_omega = 0.0, 0.0, 0.2
@@ -78,19 +80,19 @@ def test_clipping_motion(kinematics_params):
     # If vx = 0.7, then sqrt(3)/2 * 0.7 = 0.866 * 0.7 = 0.6062, which is > 0.5
     vx, vy, v_omega = 0.7, 0.0, 0.0
     efforts = calculate_expected_wheel_efforts(vx, vy, v_omega, **kinematics_params)
-    # v_w1 = 0
-    # v_w2 = -0.6062 => e2_unclipped = -0.6062 / 0.5 = -1.2124 => e2_clipped = -1.0
-    # v_w3 = 0.6062  => e3_unclipped = 0.6062 / 0.5 = 1.2124  => e3_clipped = 1.0
-    assert efforts[0] == pytest.approx(0.0)
-    assert efforts[1] == pytest.approx(-1.0)
+    # v_w1 = -0.6062 => e1 = -1.2124 => clipped -1.0
+    # v_w2 = 0 => e2 = 0
+    # v_w3 = 0.6062 => e3 = 1.2124 => clipped 1.0
+    assert efforts[0] == pytest.approx(-1.0)
+    assert efforts[1] == pytest.approx(0.0)
     assert efforts[2] == pytest.approx(1.0)
 
     # Test with strafe that should clip
     vx_strafe, vy_strafe, v_omega_strafe = 0.0, kinematics_params["max_wheel_speed"] * 1.5, 0.0 # vy = 0.5 * 1.5 = 0.75
     efforts_strafe = calculate_expected_wheel_efforts(vx_strafe, vy_strafe, v_omega_strafe, **kinematics_params)
-    # v_w1 = 0.75 => e1_unclipped = 0.75/0.5 = 1.5 => e1_clipped = 1.0
-    # v_w2 = -0.5 * 0.75 = -0.375 => e2 = -0.375/0.5 = -0.75
-    # v_w3 = -0.5 * 0.75 = -0.375 => e3 = -0.375/0.5 = -0.75
-    assert efforts_strafe[0] == pytest.approx(1.0)
-    assert efforts_strafe[1] == pytest.approx(-0.75)
-    assert efforts_strafe[2] == pytest.approx(-0.75)
+    # v_w1 = 0.375 => e1 = 0.75
+    # v_w2 = -0.75 => e2 = -1.5 => clipped -1.0
+    # v_w3 = 0.375 => e3 = 0.75
+    assert efforts_strafe[0] == pytest.approx(0.75)
+    assert efforts_strafe[1] == pytest.approx(-1.0)
+    assert efforts_strafe[2] == pytest.approx(0.75)

@@ -1,9 +1,10 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
-from image_detector.msg import LineSegmentArray, BallPositionArray # Assuming BallPositionArray will be used later
+from image_detector.msg import LineSegmentArray, BallPositionArray  # Assuming BallPositionArray will be used later
 import math
-import time # For rclpy.duration if needed explicitly, but rclpy.duration.Duration should work
+import json
+import os
 import rclpy.duration
 
 class RobotControlNode(Node):
@@ -92,6 +93,7 @@ class RobotControlNode(Node):
 
         # Initialize variables from kinematics parameters
         self.robot_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
+        self.wheel_base_radius = self.robot_radius
         self.max_wheel_speed = self.get_parameter('kinematics.max_wheel_speed_mps').get_parameter_value().double_value
         if self.max_wheel_speed <= 0:
             self.get_logger().error(f"kinematics.max_wheel_speed_mps must be positive. Value: {self.max_wheel_speed}. Defaulting to 0.5 m/s.")
@@ -135,10 +137,24 @@ class RobotControlNode(Node):
             self.balls_callback,
             10)
 
-        # Publisher
-        self.motor_efforts_publisher_ = self.create_publisher( # From previous step
+        # Publishers
+        self.motor_efforts_publisher_ = self.create_publisher(
             Float32MultiArray,
             '/motor_control_efforts',
+            10)
+
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'rogilingflex.json')
+        try:
+            with open(config_path, 'r') as f:
+                cfg = json.load(f)
+            self.steer_msg_id = next((m['id'] for m in cfg.get('transmission_messages', []) if m.get('name') == 'STEER'), 9)
+        except Exception as e:
+            self.get_logger().warn(f'Failed to load STEER config: {e}')
+            self.steer_msg_id = 9
+
+        self.steer_publisher = self.create_publisher(
+            Float32MultiArray,
+            '/steer_command',
             10)
 
         # Timer for the main control loop
@@ -456,11 +472,6 @@ class RobotControlNode(Node):
 
         # self.get_logger().debug(f"Approaching Ball ({self.target_ball_info['color']}): TargetVel Vx={self.current_target_vx:.2f}, Vy={self.current_target_vy:.2f}")
 
-    def find_target_line(self, lines_msg):
-        # self.get_logger().debug(f"find_target_line called with {len(lines_msg.lines) if lines_msg and lines_msg.lines else 'None or empty'} lines.")
-        if not lines_msg or not lines_msg.lines:
-            return None, False
-
     def handle_collecting_ball(self):
         # self.get_logger().debug("Handling COLLECTING_BALL state.")
         current_time = self.get_clock().now()
@@ -642,14 +653,17 @@ class RobotControlNode(Node):
 
     def calculate_wheel_efforts(self, vx_mps, vy_mps, v_omega_radps):
         # ホイールの配置角度（ラジアン）
-        angle_w1 = 0           # ホイール1: 前方
-        angle_w2 = 2 * math.pi / 3  # ホイール2: 左後方 120°
-        angle_w3 = 4 * math.pi / 3  # ホイール3: 右後方 240°
+        angle_w1 = math.radians(60)
+        angle_w2 = math.radians(180)
+        angle_w3 = math.radians(300)
 
         # 個々のホイール速度[m/s]を逆運動学で算出
-        v_w1 = vx_mps * math.cos(angle_w1) + vy_mps * math.sin(angle_w1) + v_omega_radps * self.wheel_base_radius
-        v_w2 = vx_mps * math.cos(angle_w2) + vy_mps * math.sin(angle_w2) + v_omega_radps * self.wheel_base_radius
-        v_w3 = vx_mps * math.cos(angle_w3) + vy_mps * math.sin(angle_w3) + v_omega_radps * self.wheel_base_radius
+        v_w1 = (-math.sin(angle_w1) * vx_mps + math.cos(angle_w1) * vy_mps +
+                v_omega_radps * self.wheel_base_radius)
+        v_w2 = (-math.sin(angle_w2) * vx_mps + math.cos(angle_w2) * vy_mps +
+                v_omega_radps * self.wheel_base_radius)
+        v_w3 = (-math.sin(angle_w3) * vx_mps + math.cos(angle_w3) * vy_mps +
+                v_omega_radps * self.wheel_base_radius)
 
         # 各ホイールの最大回転速度[rad/s]
         max_wheel_speed = self.max_wheel_speed  # パラメータで設定済み
@@ -716,15 +730,15 @@ class RobotControlNode(Node):
         return None, False # No vertical line picked, and it's not true that all lines were non-vertical.
                            # This means either no lines at all (handled at start), or a mix, or some vertical ones were missed by 'pick first'.
 
-    def publish_efforts(self, efforts_list): # NEW signature
+    def publish_efforts(self, efforts_list):
         msg = Float32MultiArray()
-        # NEW: Assumes efforts_list already contains clipped floats
         if len(efforts_list) == 3:
             msg.data = [float(efforts_list[0]), float(efforts_list[1]), float(efforts_list[2])]
-            # self.get_logger().debug(f"Publishing motor efforts: {msg.data}")
             self.motor_efforts_publisher_.publish(msg)
+            self.steer_publisher.publish(msg)
         else:
-            self.get_logger().error(f"publish_efforts called with list of length {len(efforts_list)}, expected 3.")
+            self.get_logger().error(
+                f"publish_efforts called with list of length {len(efforts_list)}, expected 3.")
 
 def main(args=None):
     rclpy.init(args=args)
