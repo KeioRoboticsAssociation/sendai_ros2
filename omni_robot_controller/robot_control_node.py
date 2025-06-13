@@ -5,6 +5,7 @@ from image_detector.msg import LineSegmentArray, BallPositionArray  # Assuming B
 import math
 import json
 import os
+import time
 import rclpy.duration
 from ctypes import c_float
 from rogilink_flex_lib import Publisher, Subscriber
@@ -441,8 +442,11 @@ class RobotControlNode(Node):
         # Check if ball is in collection zone
         if abs(error_x) < self.collection_threshold_x and abs(error_y) < self.collection_threshold_y:
             self.current_state = self.STATE_COLLECTING_BALL
-            self.collection_state_start_time = self.get_clock().now() # Mark start of collection attempt
-            self.get_logger().info(f"Ball ({self.target_ball_info['color']}) in collection zone. Transitioning to COLLECTING_BALL.")
+            self.collection_state_start_time = self.get_clock().now()  # Mark start of collection attempt
+            self.get_logger().info(
+                f"Ball ({self.target_ball_info['color']}) in collection zone. Transitioning to COLLECTING_BALL.")
+            # Start vacuum when ball enters collection zone
+            self.vacuum_pub.publish([1.0])
             self.current_target_vx = 0.0
             self.current_target_vy = 0.0
             self.current_target_v_omega = 0.0
@@ -493,9 +497,17 @@ class RobotControlNode(Node):
             self.collected_balls_this_run.append(collected_color)
             # self.total_collected_ever +=1 # If using this variable
 
-            self.get_logger().info(f"Successfully collected ball of color: {collected_color}. Balls in this run: {len(self.collected_balls_this_run)} ({self.collected_balls_this_run}).")
+            self.get_logger().info(
+                f"Successfully collected ball of color: {collected_color}. Balls in this run: {len(self.collected_balls_this_run)} ({self.collected_balls_this_run}).")
 
-            self.target_ball_info = None # Clear the target ball info
+            # Move arm to release collected ball
+            self.servo_pub.publish([1.2, 1.0])
+            time.sleep(1.0)
+            self.vacuum_pub.publish([0.0])
+            time.sleep(0.5)
+            self.servo_pub.publish([0.0, 1.0])
+
+            self.target_ball_info = None  # Clear the target ball info
 
             # Mission logic for transitioning after collection
             if not self.first_discharge_complete and \
@@ -730,11 +742,11 @@ class RobotControlNode(Node):
                            # This means either no lines at all (handled at start), or a mix, or some vertical ones were missed by 'pick first'.
 
     def publish_efforts(self, efforts_list):
-        msg = Float32MultiArray()
         if len(efforts_list) == 3:
-            msg.data = [float(efforts_list[0]), float(efforts_list[1]), float(efforts_list[2])]
-            self.motor_efforts_publisher_.publish(msg)
-            self.steer_publisher.publish(msg)
+            # Publish as a simple list using rogilink's Publisher
+            self.motor_efforts_publisher_.publish([float(efforts_list[0]),
+                                                   float(efforts_list[1]),
+                                                   float(efforts_list[2])])
         else:
             self.get_logger().error(
                 f"publish_efforts called with list of length {len(efforts_list)}, expected 3.")
