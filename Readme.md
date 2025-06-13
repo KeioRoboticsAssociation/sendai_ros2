@@ -123,6 +123,9 @@ ros2 param set /robot_control_node mission.total_balls_to_collect 4
 - `mission.balls_for_first_phase`: 第1フェーズ目標個数 (default: 2)
 - `mission.total_balls_to_collect`: 総収集目標 (default: 4)
 - `mission.discharge_wait_duration_s`: 排出待機時間 (default: 5.0 s)
+- `mission.ball_capacity`: 一度に保持できるボール数上限 (default: 5)
+- `mission.discharge_zone_colors`: 各排出ゾーンに対応するボール色順
+  (default: ["red", "blue", "yellow"])
 
 ## トピック
 

@@ -50,6 +50,8 @@ class RobotControlNode(Node):
         self.search_rotation_speed = self.get_parameter('line_following.search_rotation_speed_rad_s').get_parameter_value().double_value
         self.line_lost_timeout_duration = rclpy.duration.Duration(seconds=self.get_parameter('line_following.lost_timeout_s').get_parameter_value().double_value)
         self.last_line_seen_time = self.get_clock().now()
+        self.rotation_duration_90 = rclpy.duration.Duration(seconds=(math.pi / 2) / abs(self.search_rotation_speed))
+        self.rotation_duration_180 = rclpy.duration.Duration(seconds=(math.pi) / abs(self.search_rotation_speed))
 
         # Parameters for ball approach
         self.declare_parameter('ball_approach.target_ball_x', 320.0)  # Center of 640px image
@@ -107,6 +109,9 @@ class RobotControlNode(Node):
         self.declare_parameter('mission.balls_for_first_phase', 2) # Default: 2 for testing
         self.declare_parameter('mission.total_balls_to_collect', 4) # Default: 4 for testing
         self.declare_parameter('mission.discharge_wait_duration_s', 5.0)
+        self.declare_parameter('mission.ball_capacity', 5)
+        self.declare_parameter('mission.discharge_zone_colors',
+                               '["red", "blue", "yellow"]')
 
         # Initialize Mission Variables
         self.balls_for_first_phase = self.get_parameter('mission.balls_for_first_phase').get_parameter_value().integer_value
@@ -115,8 +120,24 @@ class RobotControlNode(Node):
         self.discharge_phase_start_time = None
         self.first_discharge_complete = False
         self.collected_balls_this_run = [] # Tracks balls collected in the current phase
+        self.ball_capacity = self.get_parameter('mission.ball_capacity').get_parameter_value().integer_value
+        zone_colors_param = self.get_parameter('mission.discharge_zone_colors').get_parameter_value().string_value
+        try:
+            self.discharge_zone_colors = json.loads(zone_colors_param)
+            if len(self.discharge_zone_colors) != 3:
+                raise ValueError
+        except Exception:
+            self.get_logger().warn(
+                "Invalid mission.discharge_zone_colors; using default [red, blue, yellow]")
+            self.discharge_zone_colors = ["red", "blue", "yellow"]
+        self.current_zone_index = 0
+        self.discharge_step = None
         # self.total_collected_ever = 0 # If needed for more complex logic, but current plan relies on collected_balls_this_run and first_discharge_complete
         self.current_main_line_image_x = None # Added for side-specific ball collection
+        self.nav_to_discharge_stage = None
+        self.left_turn_count = 0
+        self.turn_start_time = None
+        self.last_turn_detect_time = None
 
         # General state variables
         self.current_target_vx = 0.0
@@ -511,8 +532,12 @@ class RobotControlNode(Node):
             self.target_ball_info = None  # Clear the target ball info
 
             # Mission logic for transitioning after collection
-            if not self.first_discharge_complete and \
-               len(self.collected_balls_this_run) >= self.balls_for_first_phase:
+            if len(self.collected_balls_this_run) >= self.ball_capacity:
+                self.get_logger().info(
+                    f"Ball capacity of {self.ball_capacity} reached. Heading to discharge area.")
+                self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
+            elif not self.first_discharge_complete and \
+                 len(self.collected_balls_this_run) >= self.balls_for_first_phase:
                 self.get_logger().info(f"First phase collection target ({self.balls_for_first_phase} balls) reached.")
                 self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
             elif self.first_discharge_complete and \
@@ -569,16 +594,110 @@ class RobotControlNode(Node):
         self.get_logger().info("Transitioning from SECOND_COLLECTION_PHASE to SEARCHING_LINE.")
 
     def handle_navigating_to_discharge(self):
-        self.get_logger().info("Entering NAVIGATING_TO_DISCHARGE.")
-        self.current_target_vx = 0.0
-        self.current_target_vy = 0.0
-        self.current_target_v_omega = 0.0
-        # In a real scenario, this state would involve navigation logic.
-        # For now, we simulate arrival.
-        self.get_logger().info("Simulating navigation to discharge area... Arrived.")
-        self.current_state = self.STATE_DISCHARGING_BALLS
-        self.discharge_phase_start_time = self.get_clock().now()
-        self.get_logger().info("Transitioning to DISCHARGING_BALLS.")
+        now = self.get_clock().now()
+
+        if self.nav_to_discharge_stage is None:
+            self.get_logger().info("Entering NAVIGATING_TO_DISCHARGE.")
+            self.nav_to_discharge_stage = 'TURN_180'
+            self.turn_start_time = now
+            self.left_turn_count = 0
+            self.current_zone_index = 0
+            self.current_target_vx = 0.0
+            self.current_target_vy = 0.0
+            self.current_target_v_omega = self.search_rotation_speed
+            return
+
+        if self.nav_to_discharge_stage == 'TURN_180':
+            if now - self.turn_start_time < self.rotation_duration_180:
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = self.search_rotation_speed
+                return
+            else:
+                self.nav_to_discharge_stage = 'FOLLOW_REVERSE'
+
+        if self.nav_to_discharge_stage == 'FOLLOW_REVERSE':
+            vertical, only_horizontal = self.find_target_line(self.latest_lines_msg)
+            if only_horizontal:
+                self.nav_to_discharge_stage = 'LEFT_TURN'
+                self.turn_start_time = now
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = self.search_rotation_speed
+                return
+            if vertical:
+                p1 = vertical.start
+                p2 = vertical.end
+                if p1.y > p2.y:
+                    p1, p2 = p2, p1
+                dx = p2.x - p1.x
+                dy = p2.y - p1.y
+                angle_error = math.atan2(dx, dy) if abs(dy) >= 1e-3 else 0.0
+                line_center_x = (p1.x + p2.x) / 2.0
+                lateral_error = self.target_line_x - line_center_x
+                self.current_target_v_omega = -self.kp_angle * angle_error
+                self.current_target_vy = self.kp_lateral * lateral_error
+                self.current_target_vx = -abs(self.forward_speed)
+                return
+            else:
+                self.current_target_vx = -abs(self.forward_speed) * 0.5
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                return
+
+        if self.nav_to_discharge_stage == 'LEFT_TURN':
+            if now - self.turn_start_time < self.rotation_duration_90:
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = self.search_rotation_speed
+                return
+            else:
+                self.left_turn_count += 1
+                self.get_logger().info(f"Completed left turn {self.left_turn_count}/2")
+                if self.left_turn_count >= 2:
+                    self.nav_to_discharge_stage = 'AT_ZONE'
+                else:
+                    self.nav_to_discharge_stage = 'FOLLOW_REVERSE'
+                self.turn_start_time = now
+                return
+
+        if self.nav_to_discharge_stage == 'MOVE_TO_NEXT_ZONE':
+            vertical, only_horizontal = self.find_target_line(self.latest_lines_msg)
+            if only_horizontal:
+                self.nav_to_discharge_stage = 'AT_ZONE'
+                self.turn_start_time = now
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                return
+            if vertical:
+                p1 = vertical.start
+                p2 = vertical.end
+                if p1.y > p2.y:
+                    p1, p2 = p2, p1
+                dx = p2.x - p1.x
+                dy = p2.y - p1.y
+                angle_error = math.atan2(dx, dy) if abs(dy) >= 1e-3 else 0.0
+                line_center_x = (p1.x + p2.x) / 2.0
+                lateral_error = self.target_line_x - line_center_x
+                self.current_target_v_omega = -self.kp_angle * angle_error
+                self.current_target_vy = self.kp_lateral * lateral_error
+                self.current_target_vx = abs(self.forward_speed)
+                return
+            else:
+                self.current_target_vx = abs(self.forward_speed) * 0.5
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                return
+
+        if self.nav_to_discharge_stage == 'AT_ZONE':
+            self.current_target_vx = 0.0
+            self.current_target_vy = 0.0
+            self.current_target_v_omega = 0.0
+            self.nav_to_discharge_stage = None
+            self.current_state = self.STATE_DISCHARGING_BALLS
+            self.discharge_phase_start_time = now
+            return
 
     def handle_discharging_balls(self):
         self.get_logger().debug(f"Handling DISCHARGING_BALLS state. Time started: {self.discharge_phase_start_time}")
@@ -586,26 +705,52 @@ class RobotControlNode(Node):
         self.current_target_vy = 0.0
         self.current_target_v_omega = 0.0
 
-        if self.discharge_phase_start_time is None: # Should have been set in NAVIGATING_TO_DISCHARGE
+        if self.discharge_phase_start_time is None:
             self.get_logger().error("Discharge phase start time not set! Transitioning to STOPPED.")
             self.current_state = self.STATE_STOPPED
             return
 
-        if (self.get_clock().now() - self.discharge_phase_start_time) > self.discharge_wait_duration:
-            self.get_logger().info(f"Discharge complete. Balls cleared during this phase: {self.collected_balls_this_run}")
-            self.collected_balls_this_run.clear() # Clear balls from this specific run
+        if self.discharge_step is None:
+            self.discharge_step = 'PRE_ROTATE'
+            self.turn_start_time = self.get_clock().now()
+            return
 
-            if not self.first_discharge_complete:
-                self.first_discharge_complete = True
-                self.get_logger().info("First discharge complete. Transitioning to SECOND_COLLECTION_PHASE.")
-                self.current_state = self.STATE_SECOND_COLLECTION_PHASE
+        if self.discharge_step == 'PRE_ROTATE':
+            if self.get_clock().now() - self.turn_start_time < self.rotation_duration_180:
+                self.current_target_v_omega = self.search_rotation_speed
+                return
+            self.discharge_step = 'DISCHARGE'
+            return
+
+        if self.discharge_step == 'DISCHARGE':
+            target_color = self.discharge_zone_colors[self.current_zone_index]
+            while target_color in self.collected_balls_this_run:
+                self.get_logger().info(f"Discharging {target_color} ball")
+                self.servo_pub.publish([0.0, 1.0])
+                time.sleep(0.3)
+                self.servo_pub.publish([0.0, 0.0])
+                time.sleep(0.3)
+                self.collected_balls_this_run.remove(target_color)
+            self.discharge_step = 'POST_ROTATE'
+            self.turn_start_time = self.get_clock().now()
+            return
+
+        if self.discharge_step == 'POST_ROTATE':
+            if self.get_clock().now() - self.turn_start_time < self.rotation_duration_180:
+                self.current_target_v_omega = self.search_rotation_speed
+                return
+            self.discharge_step = None
+            self.current_zone_index += 1
+            if self.current_zone_index < len(self.discharge_zone_colors):
+                self.current_state = self.STATE_NAVIGATING_TO_DISCHARGE
+                self.nav_to_discharge_stage = 'MOVE_TO_NEXT_ZONE'
+                self.discharge_phase_start_time = None
             else:
-                # This was the second discharge (or a discharge after total balls collected)
-                self.get_logger().info("Final discharge complete. Transitioning to MISSION_COMPLETE.")
-                self.current_state = self.STATE_MISSION_COMPLETE
-            self.discharge_phase_start_time = None # Reset for next potential discharge
-        else:
-            self.get_logger().debug("Waiting for discharge timer...")
+                self.get_logger().info("Discharge complete. Returning to collection.")
+                self.first_discharge_complete = True
+                self.current_state = self.STATE_SECOND_COLLECTION_PHASE
+                self.discharge_phase_start_time = None
+            return
 
 
     def handle_mission_complete(self):
