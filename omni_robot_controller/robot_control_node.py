@@ -147,6 +147,7 @@ class RobotControlNode(Node):
         self.motor_efforts_publisher_ = Publisher(self, 'STEER', (c_float, c_float, c_float))
         self.servo_pub = Publisher(self, 'SERVO', (c_float, c_float))
         self.vacuum_pub = Publisher(self, 'VACUUM', (c_float))
+        self.servo_pub.publish([0.0, 1.0])
 
         # Timer for the main control loop
         self.control_loop_timer = self.create_timer(0.1, self.control_loop)
