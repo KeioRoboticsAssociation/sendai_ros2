@@ -147,6 +147,7 @@ class RobotControlNode(Node):
         self.latest_lines_msg = None
         self.latest_balls_msg = None
         self.target_ball_info = None # Stores info of the ball being approached { 'color': str, 'position': Point }
+        self.only_horizontal_start_time = None
         # self.collected_balls = [] # Replaced by collected_balls_this_run for phase logic
 
         # Subscribers
@@ -281,6 +282,7 @@ class RobotControlNode(Node):
             self.last_line_seen_time = current_time
             # Update current_main_line_image_x
             self.current_main_line_image_x = (vertical_line.start.x + vertical_line.end.x) / 2.0
+            self.only_horizontal_start_time = None
 
             p1 = vertical_line.start
             p2 = vertical_line.end
@@ -316,13 +318,27 @@ class RobotControlNode(Node):
             # self.get_logger().debug(f"Line Following: angle_err={angle_error:.2f} (rad), lat_err={lateral_error:.1f} (px), V_omega={self.current_target_v_omega:.2f}, Vy={self.current_target_vy:.2f}")
 
         elif has_only_horizontal:
-            self.get_logger().info("Only horizontal lines detected. Transitioning to STOPPED.")
-            self.current_state = self.STATE_STOPPED
-            self.current_target_vx = 0.0
-            self.current_target_vy = 0.0
-            self.current_target_v_omega = 0.0
-            self.latest_lines_msg = None # Clear message
-            self.current_main_line_image_x = None # Line lost/irrelevant
+            if self.only_horizontal_start_time is None:
+                self.get_logger().info(
+                    "Only horizontal lines detected. Waiting up to 2s for vertical line.")
+                self.only_horizontal_start_time = current_time
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+            elif current_time - self.only_horizontal_start_time > rclpy.duration.Duration(seconds=2.0):
+                self.get_logger().info(
+                    "No vertical line found after wait. Transitioning to SEARCHING_LINE.")
+                self.current_state = self.STATE_SEARCHING_LINE
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = self.search_rotation_speed
+                self.latest_lines_msg = None
+                self.current_main_line_image_x = None
+                self.only_horizontal_start_time = None
+            else:
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
         else:
             # No vertical line found, but not "only_horizontal". This could be no lines at all.
             # The timeout check at the beginning of the function should handle persistent lack of usable lines.
