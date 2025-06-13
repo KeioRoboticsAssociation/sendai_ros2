@@ -129,7 +129,7 @@ class RobotControlNode(Node):
         except Exception:
             self.get_logger().warn(
                 "Invalid mission.discharge_zone_colors; using default [red, blue, yellow]")
-            self.discharge_zone_colors = ["red", "blue", "yellow"]
+            self.discharge_zone_colors = ["blue", "yellow", "red"]
         self.current_zone_index = 0
         self.discharge_step = None
         # self.total_collected_ever = 0 # If needed for more complex logic, but current plan relies on collected_balls_this_run and first_discharge_complete
