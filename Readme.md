@@ -118,6 +118,9 @@ ros2 param set /robot_control_node mission.total_balls_to_collect 4
 ### 機構パラメータ
 - `kinematics.robot_radius_m`: ロボット半径 (default: 0.15 m)
 - `kinematics.max_wheel_speed_mps`: 最大車輪速度 (default: 0.5 m/s)
+- `kinematics.wheel1_scale`: ホイール1の出力補正係数 (default: 1.0)
+- `kinematics.wheel2_scale`: ホイール2の出力補正係数 (default: 1.0)
+- `kinematics.wheel3_scale`: ホイール3の出力補正係数 (default: 1.0)
 
 ### ミッション設定
 - `mission.balls_for_first_phase`: 第1フェーズ目標個数 (default: 2)
