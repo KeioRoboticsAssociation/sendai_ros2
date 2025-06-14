@@ -144,6 +144,10 @@ class RobotControlNode(Node):
         self.current_target_vy = 0.0
         self.current_target_v_omega = 0.0
 
+        # Timing for temporary pause when only horizontal lines are detected
+        self.horizontal_line_pause_start = None
+        self.horizontal_line_pause_duration = rclpy.duration.Duration(seconds=2.0)
+
         self.latest_lines_msg = None
         self.latest_balls_msg = None
         self.target_ball_info = None # Stores info of the ball being approached { 'color': str, 'position': Point }
@@ -288,6 +292,8 @@ class RobotControlNode(Node):
 
         if vertical_line:
             self.last_line_seen_time = current_time
+            # Reset any horizontal-line pause state since we found a vertical line
+            self.horizontal_line_pause_start = None
             # Update current_main_line_image_x
             self.current_main_line_image_x = (vertical_line.start.x + vertical_line.end.x) / 2.0
 
@@ -325,14 +331,32 @@ class RobotControlNode(Node):
             # self.get_logger().debug(f"Line Following: angle_err={angle_error:.2f} (rad), lat_err={lateral_error:.1f} (px), V_omega={self.current_target_v_omega:.2f}, Vy={self.current_target_vy:.2f}")
 
         elif has_only_horizontal:
-            self.get_logger().info("Only horizontal lines detected. Transitioning to STOPPED.")
-            self.current_state = self.STATE_STOPPED
-            self.current_target_vx = 0.0
-            self.current_target_vy = 0.0
-            self.current_target_v_omega = 0.0
-            self.latest_lines_msg = None # Clear message
-            self.current_main_line_image_x = None # Line lost/irrelevant
+            if self.horizontal_line_pause_start is None:
+                self.horizontal_line_pause_start = current_time
+                self.get_logger().info(
+                    "Only horizontal lines detected. Pausing briefly to check for vertical line.")
+
+            if current_time - self.horizontal_line_pause_start < self.horizontal_line_pause_duration:
+                # Stay still while waiting for a possible vertical line
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                return
+            else:
+                # After the pause, if still only horizontal, begin searching
+                self.get_logger().info(
+                    "No vertical line found after pause. Switching to SEARCHING_LINE.")
+                self.horizontal_line_pause_start = None
+                self.current_state = self.STATE_SEARCHING_LINE
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                self.latest_lines_msg = None
+                self.current_main_line_image_x = None
+                return
         else:
+            # Not only horizontal lines; reset pause timer
+            self.horizontal_line_pause_start = None
             # No vertical line found, but not "only_horizontal". This could be no lines at all.
             # The timeout check at the beginning of the function should handle persistent lack of usable lines.
             self.current_main_line_image_x = None # Line not reliably found
