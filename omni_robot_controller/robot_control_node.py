@@ -95,12 +95,19 @@ class RobotControlNode(Node):
         # Parameters for kinematics
         self.declare_parameter('kinematics.robot_radius_m', 0.15)  # L, distance from center to wheel
         self.declare_parameter('kinematics.max_wheel_speed_mps', 0.3) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
+        # Scale factors to compensate for mechanical differences between wheels
+        self.declare_parameter('kinematics.wheel1_scale', 1.0)
+        self.declare_parameter('kinematics.wheel2_scale', 1.0)
+        self.declare_parameter('kinematics.wheel3_scale', 1.0)
 
         # Initialize variables from kinematics parameters
         self.robot_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
         # Radius from robot center to each wheel for kinematics calculations
         self.wheel_base_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
         self.max_wheel_speed = self.get_parameter('kinematics.max_wheel_speed_mps').get_parameter_value().double_value
+        self.wheel1_scale = self.get_parameter('kinematics.wheel1_scale').get_parameter_value().double_value
+        self.wheel2_scale = self.get_parameter('kinematics.wheel2_scale').get_parameter_value().double_value
+        self.wheel3_scale = self.get_parameter('kinematics.wheel3_scale').get_parameter_value().double_value
         if self.max_wheel_speed <= 0:
             self.get_logger().error(f"kinematics.max_wheel_speed_mps must be positive. Value: {self.max_wheel_speed}. Defaulting to 0.5 m/s.")
             self.max_wheel_speed = 0.5
@@ -867,6 +874,11 @@ class RobotControlNode(Node):
         effort_w1 = clamp(v_w1 * max_wheel_speed)
         effort_w2 = clamp(v_w2 * max_wheel_speed)
         effort_w3 = clamp(v_w3 * max_wheel_speed)
+
+        # Apply wheel-specific scaling to compensate for motor differences
+        effort_w1 = clamp(effort_w1 * self.wheel1_scale)
+        effort_w2 = clamp(effort_w2 * self.wheel2_scale)
+        effort_w3 = clamp(effort_w3 * self.wheel3_scale)
 
         return [effort_w1, effort_w2, effort_w3]
 
