@@ -173,6 +173,10 @@ class RobotControlNode(Node):
         motor_efforts = self.calculate_wheel_efforts(1, 0, 0)        # Publish the calculated motor efforts
         self.publish_efforts(motor_efforts)
         time.sleep(5)
+        self.servo_pub.publish([0.0, 1.0])
+        time.sleep(0.3)
+        self.servo_pub.publish([0.0, 0.0])
+        time.sleep(0.3)
 
 
         # Timer for the main control loop
