@@ -39,7 +39,7 @@ class RobotControlNode(Node):
         self.declare_parameter('line_following.nominal_forward_speed', 0.05) # m/s
         self.declare_parameter('line_following.verticality_factor', 2.0) # dy must be 'factor' times larger than dx
         self.declare_parameter('line_following.lost_timeout_s', 3.0)
-        self.declare_parameter('line_following.search_rotation_speed_rad_s', 0.25) # rad/s
+        self.declare_parameter('line_following.search_rotation_speed_rad_s', -0.25) # rad/s
 
         # Initialize variables from line following parameters
         self.kp_angle = self.get_parameter('line_following.kp_angle').get_parameter_value().double_value
@@ -173,10 +173,10 @@ class RobotControlNode(Node):
         motor_efforts = self.calculate_wheel_efforts(1, 0, 0)        # Publish the calculated motor efforts
         self.publish_efforts(motor_efforts)
         time.sleep(5)
-        self.servo_pub.publish([0.0, 0.0])
-        time.sleep(0.3)
         self.servo_pub.publish([0.0, 1.2])
-        time.sleep(0.3)
+        time.sleep(0.8)
+        self.servo_pub.publish([0.0, 0.0])
+        time.sleep(0.8)
 
 
         # Timer for the main control loop
