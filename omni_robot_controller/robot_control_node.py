@@ -36,10 +36,10 @@ class RobotControlNode(Node):
         self.declare_parameter('line_following.kp_angle', 0.5)
         self.declare_parameter('line_following.kp_lateral', 0.01)
         self.declare_parameter('line_following.target_x_position', 320.0) # Assuming image center for 640px width
-        self.declare_parameter('line_following.nominal_forward_speed', 0.05) # m/s
+        self.declare_parameter('line_following.nominal_forward_speed', 0.2) # m/s
         self.declare_parameter('line_following.verticality_factor', 2.0) # dy must be 'factor' times larger than dx
         self.declare_parameter('line_following.lost_timeout_s', 3.0)
-        self.declare_parameter('line_following.search_rotation_speed_rad_s', -0.25) # rad/s
+        self.declare_parameter('line_following.search_rotation_speed_rad_s', -2.5) # rad/s
 
         # Initialize variables from line following parameters
         self.kp_angle = self.get_parameter('line_following.kp_angle').get_parameter_value().double_value
@@ -94,11 +94,11 @@ class RobotControlNode(Node):
 
         # Parameters for kinematics
         self.declare_parameter('kinematics.robot_radius_m', 0.15)  # L, distance from center to wheel
-        self.declare_parameter('kinematics.max_wheel_speed_mps', 0.3) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
+        self.declare_parameter('kinematics.max_wheel_speed_mps', 0.22) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
         # Scale factors to compensate for mechanical differences between wheels
         self.declare_parameter('kinematics.wheel1_scale', 1.0)
         self.declare_parameter('kinematics.wheel2_scale', 1.0)
-        self.declare_parameter('kinematics.wheel3_scale', 1.0)
+        self.declare_parameter('kinematics.wheel3_scale', 1.1)
 
         # Initialize variables from kinematics parameters
         self.robot_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
@@ -118,7 +118,7 @@ class RobotControlNode(Node):
         self.declare_parameter('mission.discharge_wait_duration_s', 5.0)
         self.declare_parameter('mission.ball_capacity', 5)
         self.declare_parameter('mission.discharge_zone_colors',
-                               '["red", "blue", "yellow"]')
+                               '["blue", "yellow", "red"]')
 
         # Initialize Mission Variables
         self.balls_for_first_phase = self.get_parameter('mission.balls_for_first_phase').get_parameter_value().integer_value
@@ -183,7 +183,9 @@ class RobotControlNode(Node):
 
         motor_efforts = self.calculate_wheel_efforts(1, 0, 0)        # Publish the calculated motor efforts
         self.publish_efforts(motor_efforts)
-        time.sleep(5)
+        time.sleep(1.2)
+        motor_efforts = self.calculate_wheel_efforts(0, 0, 0)        # Publish the calculated motor efforts
+        self.publish_efforts(motor_efforts)
         self.servo_pub.publish([0.0, 0.2])
         time.sleep(0.8)
         self.servo_pub.publish([0.0, 1.6])
@@ -508,7 +510,7 @@ class RobotControlNode(Node):
             self.get_logger().info(
                 f"Ball ({self.target_ball_info['color']}) in collection zone. Transitioning to COLLECTING_BALL.")
             # Start vacuum when ball enters collection zone
-            self.vacuum_pub.publish([1.0])
+            self.vacuum_pub.publish([1.0, 0.0])
             self.current_target_vx = 0.0
             self.current_target_vy = 0.0
             self.current_target_v_omega = 0.0
@@ -565,7 +567,7 @@ class RobotControlNode(Node):
             # Move arm to release collected ball
             self.servo_pub.publish([1.2, 1.6])
             time.sleep(1.0)
-            self.vacuum_pub.publish([0.0])
+            self.vacuum_pub.publish([0.0, 0.0])
             time.sleep(0.5)
             self.servo_pub.publish([0.0, 1.6])
 
