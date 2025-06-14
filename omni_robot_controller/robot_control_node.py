@@ -168,14 +168,14 @@ class RobotControlNode(Node):
         self.motor_efforts_publisher_ = Publisher(self, 'STEER', (c_float, c_float, c_float))
         self.servo_pub = Publisher(self, 'SERVO', (c_float, c_float))
         self.vacuum_pub = Publisher(self, 'VACUUM', (c_float))
-        self.servo_pub.publish([0.0, 1.2])
+        self.servo_pub.publish([0.0, 1.6])
 
         motor_efforts = self.calculate_wheel_efforts(1, 0, 0)        # Publish the calculated motor efforts
         self.publish_efforts(motor_efforts)
         time.sleep(5)
-        self.servo_pub.publish([0.0, 1.2])
+        self.servo_pub.publish([0.0, 1.6])
         time.sleep(0.8)
-        self.servo_pub.publish([0.0, 0.0])
+        self.servo_pub.publish([0.0, 0.2])
         time.sleep(0.8)
 
 
@@ -532,11 +532,11 @@ class RobotControlNode(Node):
                 f"Successfully collected ball of color: {collected_color}. Balls in this run: {len(self.collected_balls_this_run)} ({self.collected_balls_this_run}).")
 
             # Move arm to release collected ball
-            self.servo_pub.publish([1.2, 1.0])
+            self.servo_pub.publish([1.2, 1.6])
             time.sleep(1.0)
             self.vacuum_pub.publish([0.0])
             time.sleep(0.5)
-            self.servo_pub.publish([0.0, 1.0])
+            self.servo_pub.publish([0.0, 1.6])
 
             self.target_ball_info = None  # Clear the target ball info
 
