@@ -168,14 +168,14 @@ class RobotControlNode(Node):
         self.motor_efforts_publisher_ = Publisher(self, 'STEER', (c_float, c_float, c_float))
         self.servo_pub = Publisher(self, 'SERVO', (c_float, c_float))
         self.vacuum_pub = Publisher(self, 'VACUUM', (c_float))
-        self.servo_pub.publish([0.0, 1.0])
+        self.servo_pub.publish([0.0, 1.2])
 
         motor_efforts = self.calculate_wheel_efforts(1, 0, 0)        # Publish the calculated motor efforts
         self.publish_efforts(motor_efforts)
         time.sleep(5)
-        self.servo_pub.publish([0.0, 1.0])
-        time.sleep(0.3)
         self.servo_pub.publish([0.0, 0.0])
+        time.sleep(0.3)
+        self.servo_pub.publish([0.0, 1.2])
         time.sleep(0.3)
 
 
@@ -735,9 +735,9 @@ class RobotControlNode(Node):
             target_color = self.discharge_zone_colors[self.current_zone_index]
             while target_color in self.collected_balls_this_run:
                 self.get_logger().info(f"Discharging {target_color} ball")
-                self.servo_pub.publish([0.0, 1.0])
-                time.sleep(0.3)
                 self.servo_pub.publish([0.0, 0.0])
+                time.sleep(0.3)
+                self.servo_pub.publish([0.0, 1.2])
                 time.sleep(0.3)
                 self.collected_balls_this_run.remove(target_color)
             self.discharge_step = 'POST_ROTATE'
