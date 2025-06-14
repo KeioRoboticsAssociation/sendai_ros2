@@ -94,7 +94,7 @@ class RobotControlNode(Node):
 
         # Parameters for kinematics
         self.declare_parameter('kinematics.robot_radius_m', 0.15)  # L, distance from center to wheel
-        self.declare_parameter('kinematics.max_wheel_speed_mps', 0.5) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
+        self.declare_parameter('kinematics.max_wheel_speed_mps', 0.1) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
 
         # Initialize variables from kinematics parameters
         self.robot_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
