@@ -735,9 +735,9 @@ class RobotControlNode(Node):
             target_color = self.discharge_zone_colors[self.current_zone_index]
             while target_color in self.collected_balls_this_run:
                 self.get_logger().info(f"Discharging {target_color} ball")
-                self.servo_pub.publish([0.0, 0.0])
+                self.servo_pub.publish([0.0, 0.2])
                 time.sleep(0.3)
-                self.servo_pub.publish([0.0, 1.2])
+                self.servo_pub.publish([0.0, 1.6])
                 time.sleep(0.3)
                 self.collected_balls_this_run.remove(target_color)
             self.discharge_step = 'POST_ROTATE'
