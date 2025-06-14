@@ -189,7 +189,7 @@ class RobotControlNode(Node):
         self.latest_lines_msg = msg
 
     def balls_callback(self, msg):
-        # self.get_logger().debug(f'Received balls: {len(msg.positions)} balls')
+        # self.get_logger().debug(f'Received balls: {len(msg.balls)} balls')
         self.latest_balls_msg = msg
         # Optionally, if balls are continuously published, update last_ball_seen_time here
         # if self.target_ball_info and self.is_target_ball_visible(self.target_ball_info, msg):
@@ -349,7 +349,7 @@ class RobotControlNode(Node):
         # Only look for balls if we haven't met the collection target for the current phase
         # This check is implicitly handled by the fact that handle_collecting_ball will transition
         # to NAVIGATING_TO_DISCHARGE, so we won't be in FOLLOWING_LINE if the target was met.
-        if self.latest_balls_msg and self.latest_balls_msg.positions:
+        if self.latest_balls_msg and self.latest_balls_msg.balls:
             # Check if we should even be looking for balls based on mission phase
             # This logic is a bit tricky here, as handle_collecting_ball is the primary decider.
             # For now, we allow selecting a ball, and handle_collecting_ball will sort it out.
@@ -367,7 +367,7 @@ class RobotControlNode(Node):
                 return # Exit to allow handle_approaching_ball to take over in next loop iteration
 
     def select_target_ball(self, balls_msg, main_line_center_x):
-        if not balls_msg or not balls_msg.positions:
+        if not balls_msg or not balls_msg.balls:
             return None
 
         candidate_balls = []
@@ -376,7 +376,7 @@ class RobotControlNode(Node):
             if main_line_center_x is None:
                 self.get_logger().warn("INITIAL_COLLECTION_PHASE: Trying to select LEFT ball, but line position is unknown.")
                 return None
-            for ball in balls_msg.positions:
+            for ball in balls_msg.balls:
                 if ball.position.x < main_line_center_x:
                     candidate_balls.append(ball)
             if not candidate_balls:
@@ -386,7 +386,7 @@ class RobotControlNode(Node):
             if main_line_center_x is None:
                 self.get_logger().warn("SECOND_COLLECTION_PHASE: Trying to select RIGHT ball, but line position is unknown.")
                 return None
-            for ball in balls_msg.positions:
+            for ball in balls_msg.balls:
                 if ball.position.x >= main_line_center_x: # Greater than or equal to for the right side
                     candidate_balls.append(ball)
             if not candidate_balls:
@@ -397,7 +397,7 @@ class RobotControlNode(Node):
             # For current mission logic, ball selection should primarily happen in collection phases.
             # If called from another state, it might just use all balls.
             self.get_logger().debug(f"select_target_ball called from state {self.current_state}, not a primary collection phase. Considering all balls.")
-            candidate_balls = list(balls_msg.positions)
+            candidate_balls = list(balls_msg.balls)
 
 
         if not candidate_balls:
@@ -438,7 +438,7 @@ class RobotControlNode(Node):
         # Check if the target ball is still visible
         current_ball_position = None
         if self.latest_balls_msg:
-            for ball in self.latest_balls_msg.positions:
+            for ball in self.latest_balls_msg.balls:
                 # Assuming color is a unique enough identifier for now, or use a more robust tracking ID if available
                 if ball.color == self.target_ball_info['color']: # Simple check, might need improvement if multiple balls of same color
                     # A more robust check would be proximity to last known position if IDs aren't available
@@ -512,8 +512,8 @@ class RobotControlNode(Node):
         self.current_target_v_omega = 0.0
 
         ball_is_still_visible = False
-        if self.latest_balls_msg and self.latest_balls_msg.positions:
-            for ball in self.latest_balls_msg.positions:
+        if self.latest_balls_msg and self.latest_balls_msg.balls:
+            for ball in self.latest_balls_msg.balls:
                 # Simple check by color. Could be enhanced if balls of same color exist often
                 # or by checking proximity to the last known position of self.target_ball_info['position']
                 if ball.color == self.target_ball_info['color']:
