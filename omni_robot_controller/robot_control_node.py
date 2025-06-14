@@ -837,12 +837,12 @@ class RobotControlNode(Node):
             raise ValueError("max_wheel_speed must be positive")
 
         # 正規化: effort = wheel_speed / max_wheel_speed を [-1, 1] にクランプ
-        def clamp(val, min_val=-1.0, max_val=1.0):
+        def clamp(val, min_val=-0.1, max_val=0.1):
             return max(min(val, max_val), min_val)
 
-        effort_w1 = clamp(v_w1 / max_wheel_speed)
-        effort_w2 = clamp(v_w2 / max_wheel_speed)
-        effort_w3 = clamp(v_w3 / max_wheel_speed)
+        effort_w1 = clamp(v_w1 * max_wheel_speed)
+        effort_w2 = clamp(v_w2 * max_wheel_speed)
+        effort_w3 = clamp(v_w3 * max_wheel_speed)
 
         return [effort_w1, effort_w2, effort_w3]
 
