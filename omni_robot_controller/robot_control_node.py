@@ -94,7 +94,7 @@ class RobotControlNode(Node):
 
         # Parameters for kinematics
         self.declare_parameter('kinematics.robot_radius_m', 0.15)  # L, distance from center to wheel
-        self.declare_parameter('kinematics.max_wheel_speed_mps', 0.1) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
+        self.declare_parameter('kinematics.max_wheel_speed_mps', 0.3) # Max tangential speed of a wheel (m/s) at 1.0 duty cycle
 
         # Initialize variables from kinematics parameters
         self.robot_radius = self.get_parameter('kinematics.robot_radius_m').get_parameter_value().double_value
@@ -177,9 +177,9 @@ class RobotControlNode(Node):
         motor_efforts = self.calculate_wheel_efforts(1, 0, 0)        # Publish the calculated motor efforts
         self.publish_efforts(motor_efforts)
         time.sleep(5)
-        self.servo_pub.publish([0.0, 1.6])
-        time.sleep(0.8)
         self.servo_pub.publish([0.0, 0.2])
+        time.sleep(0.8)
+        self.servo_pub.publish([0.0, 1.6])
         time.sleep(0.8)
 
 
@@ -923,6 +923,7 @@ class RobotControlNode(Node):
     def publish_efforts(self, efforts_list):
         if len(efforts_list) == 3:
             # Publish as a simple list using rogilink's Publisher
+            self.get_logger().info(f'pub {efforts_list}') # Node logger not accessible here
             self.motor_efforts_publisher_.publish([float(efforts_list[0]),
                                                    float(efforts_list[1]),
                                                    float(efforts_list[2])])
