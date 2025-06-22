@@ -56,10 +56,10 @@ class RobotControlNode(Node):
         # Parameters for ball approach
         self.declare_parameter('ball_approach.target_ball_x', 320.0)  # Center of 640px image
         self.declare_parameter('ball_approach.target_ball_y', 450.0)  # Bottom area of 480px image (adjust as needed)
-        self.declare_parameter('ball_approach.kp_ball_x', 0.005)
-        self.declare_parameter('ball_approach.kp_ball_y', 0.005)
-        self.declare_parameter('ball_approach.approach_speed_vx_max', 0.08) # Max speed when approaching ball
-        self.declare_parameter('ball_approach.approach_speed_vy_max', 0.08) # Max speed when approaching ball
+        self.declare_parameter('ball_approach.kp_ball_x', 1.0)
+        self.declare_parameter('ball_approach.kp_ball_y', 1.0)
+        self.declare_parameter('ball_approach.approach_speed_vx_max', 0.1) # Max speed when approaching ball
+        self.declare_parameter('ball_approach.approach_speed_vy_max', 0.1) # Max speed when approaching ball
         self.declare_parameter('ball_approach.collection_threshold_x', 15.0) # Pixel tolerance for collection
         self.declare_parameter('ball_approach.collection_threshold_y', 15.0) # Pixel tolerance for collection
         self.declare_parameter('ball_approach.ball_lost_timeout_s', 2.0)
