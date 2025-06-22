@@ -36,7 +36,7 @@ class RobotControlNode(Node):
         self.declare_parameter('line_following.kp_angle', 0.5)
         self.declare_parameter('line_following.kp_lateral', 0.001)
         self.declare_parameter('line_following.target_x_position', 320.0) # Assuming image center for 640px width
-        self.declare_parameter('line_following.nominal_forward_speed', 0.2) # m/s
+        self.declare_parameter('line_following.nominal_forward_speed', 1.0) # m/s
         self.declare_parameter('line_following.verticality_factor', 2.0) # dy must be 'factor' times larger than dx
         self.declare_parameter('line_following.lost_timeout_s', 3.0)
         self.declare_parameter('line_following.search_rotation_speed_rad_s', -2.5) # rad/s
