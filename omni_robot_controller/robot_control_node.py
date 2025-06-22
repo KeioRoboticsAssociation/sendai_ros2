@@ -36,7 +36,7 @@ class RobotControlNode(Node):
         self.declare_parameter('line_following.kp_angle', 0.5)
         self.declare_parameter('line_following.kp_lateral', 0.001)
         self.declare_parameter('line_following.target_x_position', 320.0) # Assuming image center for 640px width
-        self.declare_parameter('line_following.nominal_forward_speed', 1.0) # m/s
+        self.declare_parameter('line_following.nominal_forward_speed', 0.8) # m/s
         self.declare_parameter('line_following.verticality_factor', 2.0) # dy must be 'factor' times larger than dx
         self.declare_parameter('line_following.lost_timeout_s', 3.0)
         self.declare_parameter('line_following.search_rotation_speed_rad_s', -1.1) # rad/s
@@ -290,7 +290,7 @@ class RobotControlNode(Node):
             if current_time - self.last_line_seen_time > self.line_lost_timeout_duration:
                 self.current_state = self.STATE_SEARCHING_LINE
                 self.get_logger().info("Line lost (timeout). Transitioning to SEARCHING_LINE.")
-                self.current_target_vx = 0.0
+                self.current_target_vx = self.forward_speed * 0.2
                 self.current_target_vy = 0.0
                 self.current_target_v_omega = 0.0
                 self.latest_lines_msg = None # Clear old message
