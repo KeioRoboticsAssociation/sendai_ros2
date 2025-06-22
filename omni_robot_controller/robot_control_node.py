@@ -58,8 +58,8 @@ class RobotControlNode(Node):
         self.declare_parameter('ball_approach.target_ball_y', 450.0)  # Bottom area of 480px image (adjust as needed)
         self.declare_parameter('ball_approach.kp_ball_x', 1.0)
         self.declare_parameter('ball_approach.kp_ball_y', 1.0)
-        self.declare_parameter('ball_approach.approach_speed_vx_max', 0.1) # Max speed when approaching ball
-        self.declare_parameter('ball_approach.approach_speed_vy_max', 0.1) # Max speed when approaching ball
+        self.declare_parameter('ball_approach.approach_speed_vx_max', 0.8) # Max speed when approaching ball
+        self.declare_parameter('ball_approach.approach_speed_vy_max', 0.3) # Max speed when approaching ball
         self.declare_parameter('ball_approach.collection_threshold_x', 15.0) # Pixel tolerance for collection
         self.declare_parameter('ball_approach.collection_threshold_y', 15.0) # Pixel tolerance for collection
         self.declare_parameter('ball_approach.ball_lost_timeout_s', 2.0)
@@ -256,7 +256,7 @@ class RobotControlNode(Node):
         # self.get_logger().debug("Handling SEARCHING_LINE state.")
         if not self.latest_lines_msg:
             # self.get_logger().debug("Searching: No line data yet. Commanding rotation.")
-            self.current_target_vx = 0.0
+            self.current_target_vx = self.forward_speed * 0.2
             self.current_target_vy = 0.0
             self.current_target_v_omega = self.search_rotation_speed
             return
@@ -270,7 +270,7 @@ class RobotControlNode(Node):
             self.current_target_v_omega = 0.0 # Stop search rotation
         else:
             self.current_main_line_image_x = None # Line not found
-            self.current_target_vx = 0.0
+            self.current_target_vx = self.forward_speed * 0.2
             self.current_target_vy = 0.0
             self.current_target_v_omega = self.search_rotation_speed
             # self.get_logger().debug("Still searching for a line by rotating...")
@@ -290,7 +290,7 @@ class RobotControlNode(Node):
             if current_time - self.last_line_seen_time > self.line_lost_timeout_duration:
                 self.current_state = self.STATE_SEARCHING_LINE
                 self.get_logger().info("Line lost (timeout). Transitioning to SEARCHING_LINE.")
-                self.current_target_vx = self.forward_speed * 0.2
+                self.current_target_vx = 0
                 self.current_target_vy = 0.0
                 self.current_target_v_omega = 0.0
                 self.latest_lines_msg = None # Clear old message
@@ -937,7 +937,7 @@ class RobotControlNode(Node):
     def publish_efforts(self, efforts_list):
         if len(efforts_list) == 3:
             # Publish as a simple list using rogilink's Publisher
-            self.get_logger().info(f'pub {efforts_list}') # Node logger not accessible here
+            #self.get_logger().info(f'pub {efforts_list}') # Node logger not accessible here
             self.motor_efforts_publisher_.publish([float(efforts_list[0]),
                                                    float(efforts_list[1]),
                                                    float(efforts_list[2])])
