@@ -58,11 +58,13 @@ class RobotControlNode(Node):
         self.declare_parameter('ball_approach.target_ball_y', 450.0)  # Bottom area of 480px image (adjust as needed)
         self.declare_parameter('ball_approach.kp_ball_x', 1.0)
         self.declare_parameter('ball_approach.kp_ball_y', 1.0)
-        self.declare_parameter('ball_approach.approach_speed_vx_max', 0.8) # Max speed when approaching ball
-        self.declare_parameter('ball_approach.approach_speed_vy_max', 0.3) # Max speed when approaching ball
-        self.declare_parameter('ball_approach.collection_threshold_x', 15.0) # Pixel tolerance for collection
-        self.declare_parameter('ball_approach.collection_threshold_y', 15.0) # Pixel tolerance for collection
+        self.declare_parameter('ball_approach.approach_speed_vx_max', 0.1) # Max speed when approaching ball
+        self.declare_parameter('ball_approach.approach_speed_vy_max', 0.1) # Max speed when approaching ball
+        self.declare_parameter('ball_approach.collection_threshold_x', 150.0) # Pixel tolerance for collection
+        self.declare_parameter('ball_approach.collection_threshold_y', 150.0) # Pixel tolerance for collection
         self.declare_parameter('ball_approach.ball_lost_timeout_s', 2.0)
+        self.declare_parameter('ball_approach.backup_duration_s', 1.0) # Duration to backup when ball is lost
+        self.declare_parameter('ball_approach.backup_speed', -0.2) # Speed when backing up (negative = backward)
 
         # Initialize variables from ball approach parameters
         self.target_ball_x = self.get_parameter('ball_approach.target_ball_x').get_parameter_value().double_value
@@ -74,7 +76,13 @@ class RobotControlNode(Node):
         self.collection_threshold_x = self.get_parameter('ball_approach.collection_threshold_x').get_parameter_value().double_value
         self.collection_threshold_y = self.get_parameter('ball_approach.collection_threshold_y').get_parameter_value().double_value
         self.ball_lost_timeout_duration = rclpy.duration.Duration(seconds=self.get_parameter('ball_approach.ball_lost_timeout_s').get_parameter_value().double_value)
+        self.backup_duration = rclpy.duration.Duration(seconds=self.get_parameter('ball_approach.backup_duration_s').get_parameter_value().double_value)
+        self.backup_speed = self.get_parameter('ball_approach.backup_speed').get_parameter_value().double_value
         self.last_ball_seen_time = self.get_clock().now() # Initialize
+        
+        # Ball backup state variables
+        self.backup_start_time = None
+        self.is_backing_up = False
 
         # Parameters for ball collection
         self.declare_parameter('ball_collection.collection_wait_timeout_s', 3.0) # Max time to wait for ball to disappear
@@ -256,7 +264,7 @@ class RobotControlNode(Node):
         # self.get_logger().debug("Handling SEARCHING_LINE state.")
         if not self.latest_lines_msg:
             # self.get_logger().debug("Searching: No line data yet. Commanding rotation.")
-            self.current_target_vx = self.forward_speed * 0.2
+            self.current_target_vx = 0.0
             self.current_target_vy = 0.0
             self.current_target_v_omega = self.search_rotation_speed
             return
@@ -270,7 +278,7 @@ class RobotControlNode(Node):
             self.current_target_v_omega = 0.0 # Stop search rotation
         else:
             self.current_main_line_image_x = None # Line not found
-            self.current_target_vx = self.forward_speed * 0.2
+            self.current_target_vx = 0.0
             self.current_target_vy = 0.0
             self.current_target_v_omega = self.search_rotation_speed
             # self.get_logger().debug("Still searching for a line by rotating...")
@@ -290,7 +298,7 @@ class RobotControlNode(Node):
             if current_time - self.last_line_seen_time > self.line_lost_timeout_duration:
                 self.current_state = self.STATE_SEARCHING_LINE
                 self.get_logger().info("Line lost (timeout). Transitioning to SEARCHING_LINE.")
-                self.current_target_vx = 0
+                self.current_target_vx = self.forward_speed * 0.2
                 self.current_target_vy = 0.0
                 self.current_target_v_omega = 0.0
                 self.latest_lines_msg = None # Clear old message
@@ -393,6 +401,9 @@ class RobotControlNode(Node):
                 self.current_state = self.STATE_APPROACHING_BALL
                 self.last_ball_seen_time = self.get_clock().now() # Mark time when we start approaching
                 self.get_logger().info(f"Ball detected (color: {selected_ball.color}). Transitioning to APPROACHING_BALL.")
+                # Start vacuum when ball is detected and we start approaching
+                self.vacuum_pub.publish([1.0, 0.0])
+                self.get_logger().info(f"Vacuum started for ball collection.")
                 # Reset velocities for ball approach; they will be set in handle_approaching_ball
                 self.current_target_vx = 0.0
                 self.current_target_vy = 0.0
@@ -468,6 +479,23 @@ class RobotControlNode(Node):
             self.current_state = self.STATE_SEARCHING_LINE # Or REALIGNING_TO_LINE if implemented
             return
 
+        # Check if currently backing up
+        if self.is_backing_up:
+            if current_time - self.backup_start_time < self.backup_duration:
+                # Continue backing up
+                self.current_target_vx = self.backup_speed
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                return
+            else:
+                # Backup complete, stop and reset state
+                self.is_backing_up = False
+                self.backup_start_time = None
+                self.current_target_vx = 0.0
+                self.current_target_vy = 0.0
+                self.current_target_v_omega = 0.0
+                self.get_logger().info("Backup complete. Resuming ball search.")
+
         # Check if the target ball is still visible
         current_ball_position = None
         if self.latest_balls_msg:
@@ -482,13 +510,21 @@ class RobotControlNode(Node):
 
         if current_ball_position is None:
             if current_time - self.last_ball_seen_time > self.ball_lost_timeout_duration:
-                self.get_logger().warn(f"Target ball (color: {self.target_ball_info['color']}) lost for too long. Returning to SEARCHING_LINE.")
-                self.target_ball_info = None
-                self.current_state = self.STATE_SEARCHING_LINE # Or REALIGNING_TO_LINE
-                self.current_target_vx = 0.0
-                self.current_target_vy = 0.0
-                self.current_target_v_omega = 0.0
-                return
+                # Ball lost for too long, start backup procedure
+                if not self.is_backing_up:
+                    self.get_logger().info(f"Target ball (color: {self.target_ball_info['color']}) lost for too long. Starting backup procedure.")
+                    # Stop vacuum when ball is lost
+                    self.vacuum_pub.publish([0.0, 0.0])
+                    self.get_logger().info("Vacuum stopped due to ball loss.")
+                    self.is_backing_up = True
+                    self.backup_start_time = current_time
+                    self.current_target_vx = self.backup_speed
+                    self.current_target_vy = 0.0
+                    self.current_target_v_omega = 0.0
+                    return
+                else:
+                    # Still backing up, continue
+                    return
             else:
                 # Ball temporarily not seen, maintain last command or stop
                 self.get_logger().debug(f"Target ball (color: {self.target_ball_info['color']}) temporarily not visible. Holding position.")
@@ -496,6 +532,15 @@ class RobotControlNode(Node):
                 self.current_target_vy = 0.0
                 self.current_target_v_omega = 0.0 # Or maintain last small movement
                 return
+
+        # Ball is visible, reset backup state if it was active
+        if self.is_backing_up:
+            self.is_backing_up = False
+            self.backup_start_time = None
+            self.get_logger().info("Ball found again after backup. Resuming approach.")
+            # Restart vacuum when ball is found again after backup
+            self.vacuum_pub.publish([1.0, 0.0])
+            self.get_logger().info("Vacuum restarted after ball recovery.")
 
         # Calculate error to target position (center-bottom of image)
         error_x = self.target_ball_x - current_ball_position.x
@@ -937,7 +982,7 @@ class RobotControlNode(Node):
     def publish_efforts(self, efforts_list):
         if len(efforts_list) == 3:
             # Publish as a simple list using rogilink's Publisher
-            #self.get_logger().info(f'pub {efforts_list}') # Node logger not accessible here
+            self.get_logger().info(f'pub {efforts_list}') # Node logger not accessible here
             self.motor_efforts_publisher_.publish([float(efforts_list[0]),
                                                    float(efforts_list[1]),
                                                    float(efforts_list[2])])
