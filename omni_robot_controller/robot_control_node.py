@@ -39,7 +39,7 @@ class RobotControlNode(Node):
         self.declare_parameter('line_following.nominal_forward_speed', 1.0) # m/s
         self.declare_parameter('line_following.verticality_factor', 2.0) # dy must be 'factor' times larger than dx
         self.declare_parameter('line_following.lost_timeout_s', 3.0)
-        self.declare_parameter('line_following.search_rotation_speed_rad_s', -2.5) # rad/s
+        self.declare_parameter('line_following.search_rotation_speed_rad_s', -1.1) # rad/s
 
         # Initialize variables from line following parameters
         self.kp_angle = self.get_parameter('line_following.kp_angle').get_parameter_value().double_value
